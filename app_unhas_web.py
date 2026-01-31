@@ -8,7 +8,7 @@ from supabase import create_client
 # SECRETS
 # ======================
 SENHA_ADMIN = st.secrets["SENHA_ADMIN"]
-WHATSAPP_NUMERO = st.secrets["WHATSAPP_NUMERO"]
+WHATSAPP_NUMERO = st.secrets["WHATSAPP_NUMERO"]  # ex: 5548999999999 (só números)
 SUPABASE_URL = st.secrets["SUPABASE_URL"]
 SUPABASE_KEY = st.secrets["SUPABASE_SERVICE_ROLE_KEY"]
 
@@ -16,6 +16,14 @@ supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 st.set_page_config(page_title="Agendamento de Unhas 💅", layout="centered")
 st.title("💅 Agendamento de Unhas")
+
+# ======================
+# SESSION STATE (WhatsApp)
+# ======================
+if "whatsapp_link" not in st.session_state:
+    st.session_state.whatsapp_link = None
+if "whatsapp_msg" not in st.session_state:
+    st.session_state.whatsapp_msg = None
 
 # ======================
 # FUNÇÕES SUPABASE
@@ -47,7 +55,7 @@ def listar_agendamentos():
     return df
 
 
-def horarios_ocupados(data_escolhida):
+def horarios_ocupados(data_escolhida: date):
     resp = (
         supabase
         .table("agendamentos")
@@ -58,7 +66,7 @@ def horarios_ocupados(data_escolhida):
     return set([r["horario"] for r in (resp.data or [])])
 
 
-def inserir_agendamento(cliente, data_escolhida, horario, servico):
+def inserir_agendamento(cliente, data_escolhida: date, horario, servico):
     payload = {
         "cliente": cliente,
         "data": data_escolhida.isoformat(),
@@ -68,7 +76,7 @@ def inserir_agendamento(cliente, data_escolhida, horario, servico):
     return supabase.table("agendamentos").insert(payload).execute()
 
 
-def excluir_agendamento(ag_id):
+def excluir_agendamento(ag_id: int):
     supabase.table("agendamentos").delete().eq("id", ag_id).execute()
 
 
@@ -114,6 +122,7 @@ if st.button("Confirmar Agendamento 💅"):
         if getattr(resp, "error", None):
             st.error("Esse horário acabou de ser ocupado. Escolha outro.")
         else:
+            # Monta mensagem
             mensagem = (
                 "Olá! Barbára Vitória, gostaria de confirmar meu agendamento:\n\n"
                 f"👩 Cliente: {nome}\n"
@@ -129,16 +138,25 @@ if st.button("Confirmar Agendamento 💅"):
                 f"&text={mensagem_url}"
             )
 
-            st.success("Agendamento registrado! 💖")
+            # Guarda no state pra não sumir
+            st.session_state.whatsapp_link = link_whatsapp
+            st.session_state.whatsapp_msg = mensagem
 
-            # Botão confiável no desktop
-            st.link_button("📲 Confirmar no WhatsApp", link_whatsapp)
+            st.success("Agendamento registrado! Agora confirme no WhatsApp 👇")
 
-            # Fallback (caso o navegador bloqueie)
-            st.caption("Se não abrir, copie o link abaixo e cole no navegador:")
-            st.code(link_whatsapp)
+# ======================
+# MOSTRAR BOTÃO WHATSAPP (FICA FIXO)
+# ======================
+if st.session_state.whatsapp_link:
+    st.link_button("📲 Confirmar no WhatsApp", st.session_state.whatsapp_link)
+    st.caption("Se não abrir, copie o link abaixo e cole no navegador:")
+    st.code(st.session_state.whatsapp_link)
 
-            st.rerun()
+    # opcional: botão para limpar o link depois que confirmar
+    if st.button("✅ Já confirmei no WhatsApp"):
+        st.session_state.whatsapp_link = None
+        st.session_state.whatsapp_msg = None
+        st.rerun()
 
 # ======================
 # ÁREA ADMIN
@@ -149,11 +167,9 @@ st.subheader("Área administrativa 🔐")
 if "admin_logado" not in st.session_state:
     st.session_state.admin_logado = False
 
-
 def sair_admin():
     st.session_state.admin_logado = False
     st.rerun()
-
 
 if st.session_state.admin_logado:
     st.success("Acesso liberado ✅")
@@ -161,7 +177,6 @@ if st.session_state.admin_logado:
         sair_admin()
 
     df_admin = listar_agendamentos()
-
     st.subheader("📋 Agendamentos")
 
     filtrar = st.checkbox("Filtrar por data")
