@@ -2,8 +2,8 @@ import streamlit as st
 import pandas as pd
 from datetime import date
 import urllib.parse
-import base64
 from supabase import create_client
+import fitz  # PyMuPDF
 
 # ======================
 # SECRETS
@@ -26,21 +26,22 @@ st.title("💅 Agendamento de Unhas")
 # ======================
 CATALOGO_PDF = "catalogo.pdf"
 
-def mostrar_pdf_inline(caminho_pdf: str, altura: int = 950):
-    """Mostra PDF dentro do Streamlit (iframe)."""
-    with open(caminho_pdf, "rb") as f:
-        base64_pdf = base64.b64encode(f.read()).decode("utf-8")
-    st.markdown(
-        f"""
-        <iframe
-            src="data:application/pdf;base64,{base64_pdf}"
-            width="100%"
-            height="{altura}"
-            style="border: none; border-radius: 10px;"
-        ></iframe>
-        """,
-        unsafe_allow_html=True
-    )
+@st.cache_data(show_spinner=False)
+def pdf_para_imagens(caminho_pdf: str, zoom: float = 2.0):
+    """
+    Converte cada página do PDF em PNG (bytes) para mostrar responsivo no Streamlit.
+    zoom=2.0 fica nítido sem ficar gigante demais.
+    """
+    doc = fitz.open(caminho_pdf)
+    imagens = []
+    mat = fitz.Matrix(zoom, zoom)
+
+    for page in doc:
+        pix = page.get_pixmap(matrix=mat, alpha=False)
+        imagens.append(pix.tobytes("png"))
+
+    doc.close()
+    return imagens
 
 # ======================
 # STATE: WhatsApp fixo + Admin login
@@ -80,7 +81,6 @@ def listar_agendamentos():
     df["Horário"] = df["Horário"].astype(str)
     return df
 
-
 def horarios_ocupados(data_escolhida: date):
     resp = (
         supabase
@@ -91,7 +91,6 @@ def horarios_ocupados(data_escolhida: date):
     )
     return set([r["horario"] for r in (resp.data or [])])
 
-
 def inserir_agendamento(cliente, data_escolhida: date, horario, servico):
     payload = {
         "cliente": cliente,
@@ -101,10 +100,8 @@ def inserir_agendamento(cliente, data_escolhida: date, horario, servico):
     }
     return supabase.table("agendamentos").insert(payload).execute()
 
-
 def excluir_agendamento(ag_id: int):
     return supabase.table("agendamentos").delete().eq("id", ag_id).execute()
-
 
 def montar_link_whatsapp(nome, data_atendimento: date, horario, servico):
     mensagem = (
@@ -159,7 +156,6 @@ with aba_agendar:
         else:
             resp = inserir_agendamento(nome, data_atendimento, horario_escolhido, servico)
 
-            # Checa erro sem depender de exception
             if getattr(resp, "error", None):
                 st.error("Esse horário acabou de ser ocupado. Escolha outro.")
             else:
@@ -189,6 +185,7 @@ with aba_agendar:
 with aba_catalogo:
     st.subheader("📒 Catálogo de Serviços")
 
+    # Botão para baixar o PDF
     try:
         with open(CATALOGO_PDF, "rb") as f:
             st.download_button(
@@ -197,13 +194,19 @@ with aba_catalogo:
                 file_name="catalogo.pdf",
                 mime="application/pdf"
             )
-
-        st.caption("Visualize o catálogo aqui mesmo no app 👇")
-        mostrar_pdf_inline(CATALOGO_PDF, altura=950)
-
     except FileNotFoundError:
         st.error("Não encontrei o arquivo 'catalogo.pdf' no repositório.")
-        st.info("Confirme se o arquivo está na mesma pasta do app.py e com o nome exato: catalogo.pdf")
+        st.info("Confirme se ele está na mesma pasta do app.py e com o nome exato: catalogo.pdf")
+        st.stop()
+
+    st.caption("Visualize o catálogo abaixo (responsivo no PC e no iPhone):")
+
+    with st.spinner("Carregando catálogo..."):
+        paginas_png = pdf_para_imagens(CATALOGO_PDF, zoom=2.0)
+
+    for i, img_bytes in enumerate(paginas_png, start=1):
+        st.markdown(f"**Página {i}**")
+        st.image(img_bytes, use_container_width=True)
 
 # ======================
 # ABA: ADMIN
