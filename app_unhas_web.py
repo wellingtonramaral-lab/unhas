@@ -3,23 +3,17 @@ import pandas as pd
 from datetime import date
 import urllib.parse
 from supabase import create_client
-from supabase_auth.errors import AuthApiError
 import fitz  # PyMuPDF
 
 # ======================
 # SECRETS
 # ======================
 SENHA_ADMIN = st.secrets["SENHA_ADMIN"]
-WHATSAPP_NUMERO = st.secrets["WHATSAPP_NUMERO"]  # só números: 55 + DDD + número
-
+WHATSAPP_NUMERO = st.secrets["WHATSAPP_NUMERO"]  # só números
 SUPABASE_URL = st.secrets["SUPABASE_URL"]
-SUPABASE_SERVICE_ROLE_KEY = st.secrets["SUPABASE_SERVICE_ROLE_KEY"]
-SUPABASE_ANON_KEY = st.secrets["SUPABASE_ANON_KEY"]
+SUPABASE_KEY = st.secrets["SUPABASE_SERVICE_ROLE_KEY"]
 
-# Cliente DB (server)
-supabase_db = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
-# Cliente Auth (login/cadastro)
-supabase_auth = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
+supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # ======================
 # CONFIG STREAMLIT
@@ -28,7 +22,7 @@ st.set_page_config(page_title="Agendamento de Unhas 💅", layout="centered")
 st.title("💅 Agendamento de Unhas")
 
 # ======================
-# CATÁLOGO PDF (IMAGENS)
+# CATÁLOGO PDF → IMAGENS
 # ======================
 CATALOGO_PDF = "catalogo.pdf"
 
@@ -52,17 +46,12 @@ if "wa_link" not in st.session_state:
 if "admin_logado" not in st.session_state:
     st.session_state.admin_logado = False
 
-if "cliente_logado" not in st.session_state:
-    st.session_state.cliente_logado = False
-if "cliente_email" not in st.session_state:
-    st.session_state.cliente_email = None
-
 # ======================
-# FUNÇÕES DB (SUPABASE)
+# FUNÇÕES SUPABASE
 # ======================
 def listar_agendamentos():
     resp = (
-        supabase_db
+        supabase
         .table("agendamentos")
         .select("id,cliente,data,horario,servico")
         .order("data")
@@ -88,7 +77,7 @@ def listar_agendamentos():
 
 def horarios_ocupados(data_escolhida: date):
     resp = (
-        supabase_db
+        supabase
         .table("agendamentos")
         .select("horario")
         .eq("data", data_escolhida.isoformat())
@@ -103,10 +92,10 @@ def inserir_agendamento(cliente, data_escolhida: date, horario, servico):
         "horario": horario,
         "servico": servico
     }
-    return supabase_db.table("agendamentos").insert(payload).execute()
+    return supabase.table("agendamentos").insert(payload).execute()
 
 def excluir_agendamento(ag_id: int):
-    return supabase_db.table("agendamentos").delete().eq("id", ag_id).execute()
+    return supabase.table("agendamentos").delete().eq("id", ag_id).execute()
 
 def montar_link_whatsapp(nome, data_atendimento: date, horario, servico):
     mensagem = (
@@ -120,111 +109,17 @@ def montar_link_whatsapp(nome, data_atendimento: date, horario, servico):
     return f"https://api.whatsapp.com/send?phone={WHATSAPP_NUMERO}&text={mensagem_url}"
 
 # ======================
-# FUNÇÕES AUTH (TRATADAS)
-# ======================
-def cadastrar(email: str, senha: str):
-    try:
-        return supabase_auth.auth.sign_up({"email": email, "password": senha})
-    except AuthApiError as e:
-        st.error("Não foi possível cadastrar agora. Verifique no Supabase se o Provider Email está ativo e se não há CAPTCHA ligado.")
-        st.caption("Dica: veja os logs no Streamlit Cloud (Manage app → Logs).")
-        # Escreve no log (aparece no Manage app -> Logs)
-        print("Auth sign_up error:", repr(e))
-        return None
-    except Exception as e:
-        st.error("Erro inesperado ao cadastrar.")
-        print("Unexpected sign_up error:", repr(e))
-        return None
-
-def entrar(email: str, senha: str):
-    try:
-        return supabase_auth.auth.sign_in_with_password({"email": email, "password": senha})
-    except AuthApiError as e:
-        st.error("Não foi possível entrar. Confira e-mail/senha e verifique Auth no Supabase (Email ativo / CAPTCHA desligado / e-mail confirmado).")
-        st.caption("Dica: veja os logs no Streamlit Cloud (Manage app → Logs).")
-        print("Auth sign_in error:", repr(e))
-        return None
-    except Exception as e:
-        st.error("Erro inesperado ao entrar.")
-        print("Unexpected sign_in error:", repr(e))
-        return None
-
-def sair_cliente():
-    try:
-        supabase_auth.auth.sign_out()
-    except Exception:
-        pass
-    st.session_state.cliente_logado = False
-    st.session_state.cliente_email = None
-    st.rerun()
-
-# ======================
 # TABS
 # ======================
-aba_agendar, aba_catalogo, aba_conta, aba_admin = st.tabs(
-    ["💅 Agendamento", "📒 Catálogo", "👤 Conta", "🔐 Admin"]
+aba_agendar, aba_catalogo, aba_admin = st.tabs(
+    ["💅 Agendamento", "📒 Catálogo", "🔐 Admin"]
 )
 
 # ======================
-# ABA: CONTA (CADASTRO / LOGIN)
-# ======================
-with aba_conta:
-    st.subheader("👤 Conta da Cliente")
-
-    if st.session_state.cliente_logado:
-        st.success(f"Logada como: {st.session_state.cliente_email}")
-        st.button("Sair", on_click=sair_cliente)
-    else:
-        col1, col2 = st.columns(2)
-
-        with col1:
-            st.markdown("### Entrar")
-            with st.form("form_login"):
-                email_l = st.text_input("Email", key="email_login")
-                senha_l = st.text_input("Senha", type="password", key="senha_login")
-                btn_l = st.form_submit_button("Entrar")
-
-            if btn_l:
-                resp = entrar(email_l.strip(), senha_l)
-                if resp and getattr(resp, "user", None):
-                    st.session_state.cliente_logado = True
-                    st.session_state.cliente_email = email_l.strip()
-                    st.success("Login realizado ✅")
-                    st.rerun()
-                else:
-                    st.warning("Login não concluído. Verifique e tente novamente.")
-
-        with col2:
-            st.markdown("### Cadastrar")
-            st.caption("Se a confirmação de e-mail estiver ativa no Supabase, você receberá um e-mail para confirmar.")
-            with st.form("form_cadastro"):
-                email_c = st.text_input("Email", key="email_cad")
-                senha_c = st.text_input("Senha", type="password", key="senha_cad")
-                senha2_c = st.text_input("Repita a senha", type="password", key="senha2_cad")
-                btn_c = st.form_submit_button("Criar conta")
-
-            if btn_c:
-                if not email_c or not senha_c:
-                    st.error("Preencha e-mail e senha.")
-                elif senha_c != senha2_c:
-                    st.error("As senhas não conferem.")
-                else:
-                    resp = cadastrar(email_c.strip(), senha_c)
-                    if resp and getattr(resp, "user", None):
-                        st.success("Conta criada ✅")
-                        st.info("Se precisar confirmar o e-mail, confirme e depois faça login.")
-                    else:
-                        st.warning("Cadastro não concluído. Verifique as configurações do Auth no Supabase.")
-
-# ======================
-# ABA: AGENDAMENTO (BLOQUEADO SEM LOGIN)
+# ABA: AGENDAMENTO
 # ======================
 with aba_agendar:
     st.subheader("Agende seu horário")
-
-    if not st.session_state.cliente_logado:
-        st.warning("Para agendar, você precisa entrar ou criar uma conta na aba **👤 Conta**.")
-        st.stop()
 
     nome = st.text_input("Nome da cliente")
     data_atendimento = st.date_input("Data do atendimento", min_value=date.today())
@@ -239,9 +134,14 @@ with aba_agendar:
     disponiveis = [h for h in horarios if h not in ocupados]
 
     st.markdown("**Horários disponíveis**")
+
     if disponiveis:
         with st.container(height=180):
-            horario_escolhido = st.radio("Escolha um horário", disponiveis, label_visibility="collapsed")
+            horario_escolhido = st.radio(
+                "Escolha um horário",
+                disponiveis,
+                label_visibility="collapsed"
+            )
     else:
         horario_escolhido = None
         st.warning("Nenhum horário disponível")
@@ -260,13 +160,15 @@ with aba_agendar:
                     nome, data_atendimento, horario_escolhido, servico
                 )
 
-    # Botão fixo WhatsApp
+    # ===== BOTÃO FIXO WHATSAPP =====
     if st.session_state.wa_link:
         st.divider()
         st.subheader("📲 Confirmar no WhatsApp")
+
         st.link_button("Abrir WhatsApp para confirmar", st.session_state.wa_link)
         st.caption("Se não abrir, copie e cole este link no navegador:")
         st.code(st.session_state.wa_link)
+
         if st.button("Limpar link de confirmação ✅"):
             st.session_state.wa_link = None
             st.rerun()
@@ -286,11 +188,11 @@ with aba_catalogo:
                 mime="application/pdf"
             )
     except FileNotFoundError:
-        st.error("Não encontrei o arquivo 'catalogo.pdf' no repositório.")
-        st.info("Confirme se ele está na mesma pasta do app.py e com o nome exato: catalogo.pdf")
+        st.error("Arquivo 'catalogo.pdf' não encontrado no repositório.")
         st.stop()
 
-    st.caption("Visualize o catálogo abaixo (responsivo no PC e no iPhone):")
+    st.caption("Visualize o catálogo abaixo:")
+
     with st.spinner("Carregando catálogo..."):
         paginas_png = pdf_para_imagens(CATALOGO_PDF, zoom=2.0)
 
@@ -314,48 +216,45 @@ with aba_admin:
             sair_admin()
 
         df_admin = listar_agendamentos()
-
         st.subheader("📋 Agendamentos")
 
         filtrar = st.checkbox("Filtrar por data")
         if filtrar:
-            data_filtro = st.date_input("Escolha a data", value=date.today(), key="data_filtro_admin")
-            df_filtrado = df_admin[df_admin["Data"] == str(data_filtro)]
-        else:
-            df_filtrado = df_admin
+            data_filtro = st.date_input("Escolha a data", value=date.today(), key="filtro")
+            df_admin = df_admin[df_admin["Data"] == str(data_filtro)]
 
-        if df_filtrado.empty:
+        if df_admin.empty:
             st.info("Nenhum agendamento encontrado.")
         else:
-            st.dataframe(df_filtrado.drop(columns=["id"]), use_container_width=True)
+            st.dataframe(df_admin.drop(columns=["id"]), use_container_width=True)
 
-            st.subheader("🗑️ Excluir um agendamento")
-            opcoes = df_filtrado.apply(
+            st.subheader("🗑️ Excluir agendamento")
+            opcoes = df_admin.apply(
                 lambda r: f'#{r["id"]} | {r["Cliente"]} | {r["Data"]} | {r["Horário"]} | {r["Serviço"]}',
                 axis=1
             ).tolist()
 
             escolha = st.selectbox("Selecione", opcoes)
-            if st.button("Excluir agendamento selecionado ❌"):
+            if st.button("Excluir ❌"):
                 ag_id = int(escolha.split("|")[0].replace("#", "").strip())
                 excluir_agendamento(ag_id)
-                st.success("Agendamento excluído ✅")
+                st.success("Agendamento excluído")
                 st.rerun()
 
         st.subheader("⬇️ Baixar CSV")
         st.download_button(
-            label="Baixar agendamentos.csv",
-            data=df_admin.drop(columns=["id"]).to_csv(index=False).encode("utf-8"),
+            "Baixar agendamentos.csv",
+            df_admin.drop(columns=["id"]).to_csv(index=False).encode("utf-8"),
             file_name="agendamentos.csv",
             mime="text/csv"
         )
 
     else:
-        with st.form("login_admin", clear_on_submit=False):
+        with st.form("login_admin"):
             senha = st.text_input("Senha da profissional", type="password")
-            entrar_btn = st.form_submit_button("Entrar")
+            entrar = st.form_submit_button("Entrar")
 
-        if entrar_btn:
+        if entrar:
             if senha.strip() == SENHA_ADMIN.strip():
                 st.session_state.admin_logado = True
                 st.rerun()
