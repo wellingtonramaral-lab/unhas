@@ -3,7 +3,6 @@ import pandas as pd
 from datetime import date
 import urllib.parse
 from supabase import create_client
-import streamlit.components.v1 as components
 
 # ======================
 # SECRETS
@@ -19,26 +18,26 @@ st.set_page_config(page_title="Agendamento de Unhas 💅", layout="centered")
 st.title("💅 Agendamento de Unhas")
 
 # ======================
-# STATE (WhatsApp UX)
+# STATE: WhatsApp fixo
 # ======================
 if "wa_link" not in st.session_state:
     st.session_state.wa_link = None
-if "wa_should_open" not in st.session_state:
-    st.session_state.wa_should_open = False
 
 # ======================
 # FUNÇÕES SUPABASE
 # ======================
 def listar_agendamentos():
     resp = (
-        supabase.table("agendamentos")
+        supabase
+        .table("agendamentos")
         .select("id,cliente,data,horario,servico")
         .order("data")
         .order("horario")
         .execute()
     )
-    rows = resp.data or []
-    df = pd.DataFrame(rows)
+    dados = resp.data or []
+    df = pd.DataFrame(dados)
+
     if df.empty:
         return pd.DataFrame(columns=["id", "Cliente", "Data", "Horário", "Serviço"])
 
@@ -46,7 +45,7 @@ def listar_agendamentos():
         "cliente": "Cliente",
         "data": "Data",
         "horario": "Horário",
-        "servico": "Serviço",
+        "servico": "Serviço"
     }, inplace=True)
 
     df["Data"] = df["Data"].astype(str)
@@ -56,7 +55,8 @@ def listar_agendamentos():
 
 def horarios_ocupados(data_escolhida: date):
     resp = (
-        supabase.table("agendamentos")
+        supabase
+        .table("agendamentos")
         .select("horario")
         .eq("data", data_escolhida.isoformat())
         .execute()
@@ -87,101 +87,69 @@ def montar_link_whatsapp(nome, data_atendimento: date, horario, servico):
         f"💅 Serviço: {servico}\n"
     )
     mensagem_url = urllib.parse.quote(mensagem, safe="")
-    # api.whatsapp.com é bem estável em desktop
     return f"https://api.whatsapp.com/send?phone={WHATSAPP_NUMERO}&text={mensagem_url}"
 
-
 # ======================
-# AUTO-OPEN WhatsApp (1x)
-# ======================
-# Se wa_should_open = True, abre em nova aba UMA vez e desliga a flag
-if st.session_state.wa_should_open and st.session_state.wa_link:
-    components.html(
-        f"""
-        <script>
-          // tenta abrir em nova aba
-          window.open("{st.session_state.wa_link}", "_blank");
-        </script>
-        """,
-        height=0,
-    )
-    st.session_state.wa_should_open = False
-
-
-# ======================
-# CLIENTE (form = UX melhor)
+# CLIENTE
 # ======================
 st.subheader("Agende seu horário")
 
-ocupados = set()
-horario_escolhido = None
+nome = st.text_input("Nome da cliente")
+data_atendimento = st.date_input("Data do atendimento", min_value=date.today())
 
-with st.form("form_agendamento", clear_on_submit=False):
-    nome = st.text_input("Nome da cliente")
-    data_atendimento = st.date_input("Data do atendimento", min_value=date.today())
-    servico = st.selectbox(
-        "Tipo de serviço",
-        ["Alongamento em Gel", "Alongamento em Fibra de Vidro", "Pedicure"]
-    )
+servico = st.selectbox(
+    "Tipo de serviço",
+    ["Alongamento em Gel", "Alongamento em Fibra de Vidro", "Pedicure"]
+)
 
-    horarios = ["07:00", "08:30", "10:00", "13:30", "15:00", "16:30", "18:00"]
-    ocupados = horarios_ocupados(data_atendimento)
-    disponiveis = [h for h in horarios if h not in ocupados]
+horarios = ["07:00", "08:30", "10:00", "13:30", "15:00", "16:30", "18:00"]
+ocupados = horarios_ocupados(data_atendimento)
+disponiveis = [h for h in horarios if h not in ocupados]
 
-    st.markdown("**Horários disponíveis**")
-    if disponiveis:
+st.subheader("Horários disponíveis")
+if disponiveis:
+    with st.container(height=180):
         horario_escolhido = st.radio(
             "Escolha um horário",
             disponiveis,
             label_visibility="collapsed"
         )
-    else:
-        st.warning("Nenhum horário disponível")
-        horario_escolhido = None
+else:
+    horario_escolhido = None
+    st.warning("Nenhum horário disponível")
 
-    confirmar = st.form_submit_button("Confirmar Agendamento 💅")
-
-if confirmar:
+# ======================
+# CONFIRMAR AGENDAMENTO
+# ======================
+if st.button("Confirmar Agendamento 💅"):
     if not nome or not horario_escolhido:
-        st.error("Preencha todos os campos.")
+        st.error("Preencha todos os campos")
     else:
         resp = inserir_agendamento(nome, data_atendimento, horario_escolhido, servico)
 
-        # o client nem sempre joga exception; checa resp.error
+        # Checa erro sem depender de exception
         if getattr(resp, "error", None):
             st.error("Esse horário acabou de ser ocupado. Escolha outro.")
         else:
-            # gera link e guarda no state (não some)
+            st.success("Agendamento registrado! 💖")
             st.session_state.wa_link = montar_link_whatsapp(
                 nome, data_atendimento, horario_escolhido, servico
             )
-            # marca para abrir automaticamente em nova aba
-            st.session_state.wa_should_open = True
-
-            st.success("Agendamento registrado! Abrindo o WhatsApp para confirmar… ✅")
-            st.toast("Se o navegador bloquear pop-up, use o botão abaixo.", icon="📲")
-
 
 # ======================
-# BLOCO FIXO: CONFIRMAR NO WHATSAPP
-# (fica visível até você limpar)
+# BOTÃO FIXO WHATSAPP
 # ======================
 if st.session_state.wa_link:
     st.divider()
     st.subheader("📲 Confirmar no WhatsApp")
 
-    col1, col2 = st.columns([2, 1])
-    with col1:
-        st.link_button("Abrir WhatsApp agora", st.session_state.wa_link)
-        st.caption("Se não abrir, copie e cole o link abaixo no navegador:")
-        st.code(st.session_state.wa_link)
+    st.link_button("Abrir WhatsApp para confirmar", st.session_state.wa_link)
+    st.caption("Se não abrir, copie e cole este link no navegador:")
+    st.code(st.session_state.wa_link)
 
-    with col2:
-        if st.button("Limpar confirmação ✅", use_container_width=True):
-            st.session_state.wa_link = None
-            st.session_state.wa_should_open = False
-            st.rerun()
-
+    if st.button("Limpar link de confirmação ✅"):
+        st.session_state.wa_link = None
+        st.rerun()
 
 # ======================
 # ÁREA ADMIN
@@ -238,7 +206,7 @@ if st.session_state.admin_logado:
     )
 
 else:
-    with st.form("login_admin", clear_on_submit=False):
+    with st.form("login_admin"):
         senha = st.text_input("Senha da profissional", type="password")
         entrar = st.form_submit_button("Entrar")
 
