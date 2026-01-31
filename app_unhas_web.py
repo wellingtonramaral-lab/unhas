@@ -1,3 +1,7 @@
+import urllib.parse
+
+WHATSAPP_NUMERO = "5548988702399"  # <<< troque pelo seu
+
 import streamlit as st
 import pandas as pd
 import os
@@ -62,8 +66,39 @@ if st.button("Confirmar Agendamento 💅"):
     df = pd.concat([df, novo], ignore_index=True)
     df.to_csv(CSV_FILE, index=False)
 
-    st.success("Agendamento confirmado 💖")
-    st.rerun()
+    mensagem = f"""
+Olá! 💅 Gostaria de confirmar meu agendamento:
+
+👩 Cliente: {nome}
+📅 Data: {data}
+⏰ Horário: {horario}
+💅 Serviço: {servico}
+"""
+
+mensagem_url = urllib.parse.quote(mensagem)
+
+link_whatsapp = f"https://wa.me/{WHATSAPP_NUMERO}?text={mensagem_url}"
+
+st.success("Agendamento registrado! 💖")
+st.markdown(
+    f"""
+    <a href="{link_whatsapp}" target="_blank">
+        <button style="
+            background-color:#25D366;
+            color:white;
+            padding:12px 20px;
+            border:none;
+            border-radius:8px;
+            font-size:16px;
+            cursor:pointer;
+        ">
+            📲 Confirmar no WhatsApp
+        </button>
+    </a>
+    """,
+    unsafe_allow_html=True
+)
+
 
 # ===== ÁREA ADMIN =====
 st.divider()
