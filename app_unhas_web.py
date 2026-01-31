@@ -68,7 +68,7 @@ if st.button("Confirmar Agendamento 💅"):
     df.to_csv(CSV_FILE, index=False)
 
     mensagem = f"""
-Olá! 💅 Gostaria de confirmar meu agendamento:
+Olá! Barbára Vitória Gostaria de confirmar meu agendamento:
 
 👩 Cliente: {nome}
 📅 Data: {data}
