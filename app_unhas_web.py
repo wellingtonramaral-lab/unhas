@@ -1,14 +1,12 @@
-import urllib.parse
-
-WHATSAPP_NUMERO = "5548988702399"  # <<< troque pelo seu
-
 import streamlit as st
 import pandas as pd
 import os
 from datetime import date
+import urllib.parse
 
 # ===== CONFIGURAÇÕES =====
 SENHA_ADMIN = "1234"  # <<< TROQUE SUA SENHA AQUI
+WHATSAPP_NUMERO = "5548988702399"  # <<< SEU WHATSAPP
 CSV_FILE = "agendamentos.csv"
 
 st.set_page_config(page_title="Agendamento de Unhas 💅", layout="centered")
@@ -50,6 +48,7 @@ else:
     horario = None
     st.warning("Nenhum horário disponível")
 
+# ===== CONFIRMAR AGENDAMENTO =====
 if st.button("Confirmar Agendamento 💅"):
     if not nome or not horario:
         st.error("Preencha todos os campos")
@@ -60,8 +59,10 @@ if st.button("Confirmar Agendamento 💅"):
         st.error("Esse horário acabou de ser ocupado")
         st.stop()
 
-    novo = pd.DataFrame([[nome, str(data), horario, servico]],
-                        columns=["Cliente", "Data", "Horário", "Serviço"])
+    novo = pd.DataFrame(
+        [[nome, str(data), horario, servico]],
+        columns=["Cliente", "Data", "Horário", "Serviço"]
+    )
 
     df = pd.concat([df, novo], ignore_index=True)
     df.to_csv(CSV_FILE, index=False)
@@ -75,70 +76,31 @@ Olá! 💅 Gostaria de confirmar meu agendamento:
 💅 Serviço: {servico}
 """
 
-mensagem_url = urllib.parse.quote(mensagem)
+    mensagem_url = urllib.parse.quote(mensagem)
+    link_whatsapp = f"https://wa.me/{WHATSAPP_NUMERO}?text={mensagem_url}"
 
-link_whatsapp = f"https://wa.me/{WHATSAPP_NUMERO}?text={mensagem_url}"
-
-st.success("Agendamento registrado! 💖")
-st.markdown(
-    f"""
-    <a href="{link_whatsapp}" target="_blank">
-        <button style="
-            background-color:#25D366;
-            color:white;
-            padding:12px 20px;
-            border:none;
-            border-radius:8px;
-            font-size:16px;
-            cursor:pointer;
-        ">
-            📲 Confirmar no WhatsApp
-        </button>
-    </a>
-    """,
-    unsafe_allow_html=True
-)
-
+    st.success("Agendamento registrado! 💖")
+    st.markdown(
+        f"""
+        <a href="{link_whatsapp}" target="_blank">
+            <button style="
+                background-color:#25D366;
+                color:white;
+                padding:12px 20px;
+                border:none;
+                border-radius:8px;
+                font-size:16px;
+                cursor:pointer;
+            ">
+                📲 Confirmar no WhatsApp
+            </button>
+        </a>
+        """,
+        unsafe_allow_html=True
+    )
 
 # ===== ÁREA ADMIN =====
 st.divider()
 st.subheader("Área administrativa 🔐")
 
 senha = st.text_input("Senha da profissional", type="password")
-
-if senha == SENHA_ADMIN:
-    st.success("Acesso liberado")
-
-    df = carregar_dados()
-    df_display = df[df["Data"] == str(data)].sort_values("Horário")
-
-    st.subheader("Agenda do dia")
-    if df_display.empty:
-        st.info("Nenhum agendamento")
-    else:
-        st.table(df_display)
-
-        cancelar = st.selectbox(
-            "Cancelar agendamento",
-            [
-                f"{row['Cliente']} às {row['Horário']} ({row['Serviço']})"
-                for _, row in df_display.iterrows()
-            ]
-        )
-
-        if st.button("Cancelar ❌"):
-            index = df_display.index[
-                df_display.apply(
-                    lambda r: f"{r['Cliente']} às {r['Horário']} ({r['Serviço']})" == cancelar,
-                    axis=1
-                )
-            ][0]
-
-            df = df.drop(index)
-            df.to_csv(CSV_FILE, index=False)
-
-            st.success("Agendamento cancelado")
-            st.rerun()
-
-elif senha:
-    st.error("Senha incorreta")
