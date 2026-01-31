@@ -3,21 +3,22 @@ import pandas as pd
 from datetime import date
 import urllib.parse
 from supabase import create_client
+from supabase_auth.errors import AuthApiError
 import fitz  # PyMuPDF
 
 # ======================
 # SECRETS
 # ======================
 SENHA_ADMIN = st.secrets["SENHA_ADMIN"]
-WHATSAPP_NUMERO = st.secrets["WHATSAPP_NUMERO"]  # só números
+WHATSAPP_NUMERO = st.secrets["WHATSAPP_NUMERO"]  # só números: 55 + DDD + número
+
 SUPABASE_URL = st.secrets["SUPABASE_URL"]
 SUPABASE_SERVICE_ROLE_KEY = st.secrets["SUPABASE_SERVICE_ROLE_KEY"]
 SUPABASE_ANON_KEY = st.secrets["SUPABASE_ANON_KEY"]
 
-# cliente DB (server) - mantém como você já estava
+# Cliente DB (server)
 supabase_db = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
-
-# cliente Auth (para cadastro/login)
+# Cliente Auth (login/cadastro)
 supabase_auth = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
 
 # ======================
@@ -27,7 +28,7 @@ st.set_page_config(page_title="Agendamento de Unhas 💅", layout="centered")
 st.title("💅 Agendamento de Unhas")
 
 # ======================
-# CATÁLOGO PDF
+# CATÁLOGO PDF (IMAGENS)
 # ======================
 CATALOGO_PDF = "catalogo.pdf"
 
@@ -51,14 +52,13 @@ if "wa_link" not in st.session_state:
 if "admin_logado" not in st.session_state:
     st.session_state.admin_logado = False
 
-# auth state
 if "cliente_logado" not in st.session_state:
     st.session_state.cliente_logado = False
 if "cliente_email" not in st.session_state:
     st.session_state.cliente_email = None
 
 # ======================
-# FUNÇÕES SUPABASE (DB)
+# FUNÇÕES DB (SUPABASE)
 # ======================
 def listar_agendamentos():
     resp = (
@@ -120,20 +120,40 @@ def montar_link_whatsapp(nome, data_atendimento: date, horario, servico):
     return f"https://api.whatsapp.com/send?phone={WHATSAPP_NUMERO}&text={mensagem_url}"
 
 # ======================
-# FUNÇÕES AUTH
+# FUNÇÕES AUTH (TRATADAS)
 # ======================
 def cadastrar(email: str, senha: str):
-    return supabase_auth.auth.sign_up({"email": email, "password": senha})
+    try:
+        return supabase_auth.auth.sign_up({"email": email, "password": senha})
+    except AuthApiError as e:
+        st.error("Não foi possível cadastrar agora. Verifique no Supabase se o Provider Email está ativo e se não há CAPTCHA ligado.")
+        st.caption("Dica: veja os logs no Streamlit Cloud (Manage app → Logs).")
+        # Escreve no log (aparece no Manage app -> Logs)
+        print("Auth sign_up error:", repr(e))
+        return None
+    except Exception as e:
+        st.error("Erro inesperado ao cadastrar.")
+        print("Unexpected sign_up error:", repr(e))
+        return None
 
 def entrar(email: str, senha: str):
-    return supabase_auth.auth.sign_in_with_password({"email": email, "password": senha})
+    try:
+        return supabase_auth.auth.sign_in_with_password({"email": email, "password": senha})
+    except AuthApiError as e:
+        st.error("Não foi possível entrar. Confira e-mail/senha e verifique Auth no Supabase (Email ativo / CAPTCHA desligado / e-mail confirmado).")
+        st.caption("Dica: veja os logs no Streamlit Cloud (Manage app → Logs).")
+        print("Auth sign_in error:", repr(e))
+        return None
+    except Exception as e:
+        st.error("Erro inesperado ao entrar.")
+        print("Unexpected sign_in error:", repr(e))
+        return None
 
-def sair():
+def sair_cliente():
     try:
         supabase_auth.auth.sign_out()
     except Exception:
         pass
-
     st.session_state.cliente_logado = False
     st.session_state.cliente_email = None
     st.rerun()
@@ -146,14 +166,14 @@ aba_agendar, aba_catalogo, aba_conta, aba_admin = st.tabs(
 )
 
 # ======================
-# ABA: CONTA (CADASTRO/LOGIN)
+# ABA: CONTA (CADASTRO / LOGIN)
 # ======================
 with aba_conta:
     st.subheader("👤 Conta da Cliente")
 
     if st.session_state.cliente_logado:
         st.success(f"Logada como: {st.session_state.cliente_email}")
-        st.button("Sair", on_click=sair)
+        st.button("Sair", on_click=sair_cliente)
     else:
         col1, col2 = st.columns(2)
 
@@ -166,18 +186,17 @@ with aba_conta:
 
             if btn_l:
                 resp = entrar(email_l.strip(), senha_l)
-                # se deu certo, resp.user existe
-                if getattr(resp, "user", None):
+                if resp and getattr(resp, "user", None):
                     st.session_state.cliente_logado = True
                     st.session_state.cliente_email = email_l.strip()
                     st.success("Login realizado ✅")
                     st.rerun()
                 else:
-                    st.error("Não foi possível entrar. Confira e-mail/senha.")
+                    st.warning("Login não concluído. Verifique e tente novamente.")
 
         with col2:
             st.markdown("### Cadastrar")
-            st.caption("Se a confirmação de e-mail estiver ativada no Supabase, você vai receber um e-mail para confirmar.")
+            st.caption("Se a confirmação de e-mail estiver ativa no Supabase, você receberá um e-mail para confirmar.")
             with st.form("form_cadastro"):
                 email_c = st.text_input("Email", key="email_cad")
                 senha_c = st.text_input("Senha", type="password", key="senha_cad")
@@ -191,14 +210,14 @@ with aba_conta:
                     st.error("As senhas não conferem.")
                 else:
                     resp = cadastrar(email_c.strip(), senha_c)
-                    if getattr(resp, "user", None):
+                    if resp and getattr(resp, "user", None):
                         st.success("Conta criada ✅")
-                        st.info("Se o Supabase estiver com confirmação de e-mail ligada, confirme no seu e-mail e depois faça login.")
+                        st.info("Se precisar confirmar o e-mail, confirme e depois faça login.")
                     else:
-                        st.error("Não foi possível cadastrar. Tente outro e-mail ou uma senha diferente.")
+                        st.warning("Cadastro não concluído. Verifique as configurações do Auth no Supabase.")
 
 # ======================
-# ABA: AGENDAMENTO (bloqueado sem login)
+# ABA: AGENDAMENTO (BLOQUEADO SEM LOGIN)
 # ======================
 with aba_agendar:
     st.subheader("Agende seu horário")
