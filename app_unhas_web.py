@@ -8,6 +8,7 @@ import json
 import streamlit.components.v1 as components
 from PIL import Image
 import io
+from postgrest.exceptions import APIError
 
 # ======================
 # SECRETS
@@ -147,9 +148,7 @@ def limpar_confirmacao():
 
 
 def make_reserva_key(nome: str, data_at: date, horario: str, servico: str) -> str:
-    # chave simples para impedir clique duplo criando 2 inserts
-    base = f"{nome.strip().lower()}|{data_at.isoformat()}|{horario}|{servico}"
-    return base
+    return f"{nome.strip().lower()}|{data_at.isoformat()}|{horario}|{servico}"
 
 
 # ======================
@@ -220,6 +219,7 @@ def horarios_ocupados(data_escolhida: date):
                 ocupados.add(horario)
             else:
                 if created_at is None:
+                    # se não der pra parsear, por segurança bloqueia
                     ocupados.add(horario)
                 else:
                     if created_at.tzinfo is None:
@@ -239,7 +239,21 @@ def inserir_pre_agendamento(cliente, data_escolhida: date, horario, servico, val
         "status": "pendente",
         "valor": valor_sinal
     }
-    return supabase.table("agendamentos").insert(payload).execute()
+
+    try:
+        return supabase.table("agendamentos").insert(payload).execute()
+    except APIError as e:
+        msg = str(e)
+
+        # caso comum: duplicidade (índice único data+horario)
+        if "duplicate key" in msg.lower() or "23505" in msg:
+            st.warning("Esse horário já foi reservado. Escolha outro.")
+            return None
+
+        # Mostra erro real (para você me mandar)
+        st.error("Erro ao salvar no Supabase. Copie e me envie essa mensagem:")
+        st.code(msg)
+        return None
 
 
 def marcar_como_pago(ag_id: int):
@@ -298,11 +312,11 @@ with aba_agendar:
 
     total_servico = float(PRECOS.get(servico, 0.0))
     valor_sinal = calcular_sinal(servico)
-
     st.caption(f"Valor do serviço: **{fmt_brl(total_servico)}** • Sinal para reservar: **{fmt_brl(valor_sinal)}**")
 
     horarios = ["07:00", "08:30", "10:00", "13:30", "15:00", "16:30", "18:00"]
 
+    # não consulta supabase se for domingo (mas também não trava outras abas)
     ocupados = horarios_ocupados(data_atendimento) if not eh_domingo else set()
     dia_lotado = (len(ocupados) >= len(horarios)) if not eh_domingo else False
 
@@ -317,9 +331,9 @@ with aba_agendar:
 
     st.divider()
 
-    left, r1, r2, r3 = st.columns([1.2, 1, 1, 0.9])
-
     pode_agendar = (not eh_domingo) and (not dia_lotado) and (not st.session_state.reservando)
+
+    left, r1, r2, r3 = st.columns([1.2, 1, 1, 0.9])
 
     with left:
         reservar_click = st.button(
@@ -358,7 +372,6 @@ with aba_agendar:
         if not nome or not horario_escolhido:
             st.error("Preencha todos os campos.")
         else:
-            # trava clique duplo
             st.session_state.reservando = True
 
             chave = make_reserva_key(nome, data_atendimento, horario_escolhido, servico)
@@ -366,7 +379,7 @@ with aba_agendar:
                 st.warning("Você já enviou esse agendamento. Se precisar, clique em Limpar e tente novamente.")
                 st.session_state.reservando = False
             else:
-                # checa anti-corrida (horário ocupado)
+                # checa de novo (anti-corrida)
                 if horario_escolhido in horarios_ocupados(data_atendimento):
                     st.error("Esse horário acabou de ser ocupado. Escolha outro.")
                     st.session_state.reservando = False
@@ -379,14 +392,7 @@ with aba_agendar:
                         valor_sinal
                     )
 
-                    # se o índice único barrar duplicado, resp pode vir com erro
-                    if getattr(resp, "error", None):
-                        # tenta reconhecer duplicidade pelo texto
-                        err_txt = str(resp.error)
-                        if "duplicate key" in err_txt.lower() or "23505" in err_txt:
-                            st.warning("Esse horário já foi reservado. Escolha outro.")
-                        else:
-                            st.error("Não foi possível salvar agora. Tente novamente.")
+                    if resp is None:
                         st.session_state.reservando = False
                     else:
                         mensagem = montar_mensagem_pagamento(
