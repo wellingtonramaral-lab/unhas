@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 import urllib.parse
 from supabase import create_client
 import fitz  # PyMuPDF
@@ -17,6 +17,11 @@ WHATSAPP_NUMERO = st.secrets["WHATSAPP_NUMERO"]  # só números, ex: 55489999999
 SUPABASE_URL = st.secrets["SUPABASE_URL"]
 SUPABASE_KEY = st.secrets["SUPABASE_SERVICE_ROLE_KEY"]
 
+PIX_CHAVE = st.secrets.get("PIX_CHAVE", "")
+PIX_NOME = st.secrets.get("PIX_NOME", "Profissional")
+PIX_CIDADE = st.secrets.get("PIX_CIDADE", "BRASIL")
+TEMPO_EXPIRACAO_MIN = int(st.secrets.get("TEMPO_EXPIRACAO_MIN", 30))  # 0 desativa expiração
+
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # ======================
@@ -26,9 +31,37 @@ st.set_page_config(page_title="Agendamento de Unhas 💅", layout="centered")
 st.title("💅 Agendamento de Unhas")
 
 # ======================
+# PREÇOS / SINAL
+# ======================
+PRECOS = {
+    "Alongamento em Gel": 180.0,
+    "Alongamento em Fibra de Vidro": 200.0,
+    "Pedicure": 60.0,
+    "Manutenção": 120.0,
+}
+
+SINAL_PORCENTAGEM = 0.30  # 30% de sinal
+
+
+def fmt_brl(v: float) -> str:
+    # Formata sem depender de locale
+    s = f"{v:,.2f}"
+    s = s.replace(",", "X").replace(".", ",").replace("X", ".")
+    return f"R$ {s}"
+
+
+def calcular_sinal(servico: str) -> float:
+    total = float(PRECOS.get(servico, 0.0))
+    sinal = total * SINAL_PORCENTAGEM
+    # arredonda para 2 casas
+    return round(sinal + 1e-9, 2)
+
+
+# ======================
 # CATÁLOGO PDF → IMAGENS (FIX: FUNDO BRANCO)
 # ======================
 CATALOGO_PDF = "catalogo.pdf"
+
 
 @st.cache_data(show_spinner=False)
 def pdf_para_imagens_com_fundo_branco(caminho_pdf: str, zoom: float = 2.0):
@@ -41,11 +74,9 @@ def pdf_para_imagens_com_fundo_branco(caminho_pdf: str, zoom: float = 2.0):
     mat = fitz.Matrix(zoom, zoom)
 
     for page in doc:
-        # alpha=True para pegar transparência
         pix = page.get_pixmap(matrix=mat, alpha=True)
         png_bytes = pix.tobytes("png")
 
-        # Composita em fundo branco (evita ficar tudo preto)
         img = Image.open(io.BytesIO(png_bytes)).convert("RGBA")
         bg = Image.new("RGBA", img.size, (255, 255, 255, 255))
         out = Image.alpha_composite(bg, img).convert("RGB")
@@ -57,22 +88,50 @@ def pdf_para_imagens_com_fundo_branco(caminho_pdf: str, zoom: float = 2.0):
     doc.close()
     return imagens
 
+
 # ======================
 # STATE
 # ======================
 if "admin_logado" not in st.session_state:
     st.session_state.admin_logado = False
 
-# link do whatsapp após agendar
 if "wa_link" not in st.session_state:
     st.session_state.wa_link = None
 
-# resumo do último agendamento
 if "ultimo_ag" not in st.session_state:
     st.session_state.ultimo_ag = None
 
 if "do_copy" not in st.session_state:
     st.session_state.do_copy = False
+
+if "copy_text" not in st.session_state:
+    st.session_state.copy_text = None
+
+
+# ======================
+# HELPERS
+# ======================
+def copiar_para_clipboard(texto: str):
+    components.html(
+        f"<script>navigator.clipboard.writeText({json.dumps(texto)});</script>",
+        height=0
+    )
+
+
+def parse_dt(dt_str: str) -> datetime | None:
+    if not dt_str:
+        return None
+    try:
+        # supabase pode vir com Z
+        dt_str = dt_str.replace("Z", "+00:00")
+        return datetime.fromisoformat(dt_str)
+    except Exception:
+        return None
+
+
+def agora_utc() -> datetime:
+    return datetime.now(timezone.utc)
+
 
 # ======================
 # FUNÇÕES SUPABASE
@@ -81,7 +140,7 @@ def listar_agendamentos():
     resp = (
         supabase
         .table("agendamentos")
-        .select("id,cliente,data,horario,servico")
+        .select("id,cliente,data,horario,servico,status,valor,created_at")
         .order("data")
         .order("horario")
         .execute()
@@ -90,63 +149,123 @@ def listar_agendamentos():
     df = pd.DataFrame(dados)
 
     if df.empty:
-        return pd.DataFrame(columns=["id", "Cliente", "Data", "Horário", "Serviço"])
+        return pd.DataFrame(columns=["id", "Cliente", "Data", "Horário", "Serviço", "Status", "Valor", "Criado em"])
 
     df.rename(columns={
         "cliente": "Cliente",
         "data": "Data",
         "horario": "Horário",
-        "servico": "Serviço"
+        "servico": "Serviço",
+        "status": "Status",
+        "valor": "Valor",
+        "created_at": "Criado em"
     }, inplace=True)
 
     df["Data"] = df["Data"].astype(str)
     df["Horário"] = df["Horário"].astype(str)
+    df["Status"] = df["Status"].astype(str)
+
+    # Valor pode vir None
+    df["Valor"] = df["Valor"].apply(lambda x: float(x) if x is not None else 0.0)
+
     return df
 
+
 def horarios_ocupados(data_escolhida: date):
+    """
+    Considera ocupado:
+    - status = 'pago'
+    - status = 'pendente' e (se TEMPO_EXPIRACAO_MIN > 0) ainda não expirou
+    """
     resp = (
         supabase
         .table("agendamentos")
-        .select("horario")
+        .select("horario,status,created_at")
         .eq("data", data_escolhida.isoformat())
         .execute()
     )
-    return set([r["horario"] for r in (resp.data or [])])
 
-def inserir_agendamento(cliente, data_escolhida: date, horario, servico):
+    rows = resp.data or []
+    ocupados = set()
+    now = agora_utc()
+
+    for r in rows:
+        horario = r.get("horario")
+        status = (r.get("status") or "").lower().strip()
+        created_at = parse_dt(r.get("created_at", ""))
+
+        if status == "pago":
+            ocupados.add(horario)
+            continue
+
+        if status == "pendente":
+            if TEMPO_EXPIRACAO_MIN <= 0:
+                ocupados.add(horario)
+            else:
+                if created_at is None:
+                    # se não der pra parsear, por segurança bloqueia
+                    ocupados.add(horario)
+                else:
+                    # se created_at veio sem tz, assume UTC
+                    if created_at.tzinfo is None:
+                        created_at = created_at.replace(tzinfo=timezone.utc)
+                    if (now - created_at) <= timedelta(minutes=TEMPO_EXPIRACAO_MIN):
+                        ocupados.add(horario)
+
+    return set(ocupados)
+
+
+def inserir_pre_agendamento(cliente, data_escolhida: date, horario, servico, valor_sinal: float):
     payload = {
         "cliente": cliente,
         "data": data_escolhida.isoformat(),
         "horario": horario,
-        "servico": servico
+        "servico": servico,
+        "status": "pendente",
+        "valor": valor_sinal
     }
     return supabase.table("agendamentos").insert(payload).execute()
+
+
+def marcar_como_pago(ag_id: int):
+    return supabase.table("agendamentos").update({"status": "pago"}).eq("id", ag_id).execute()
+
 
 def excluir_agendamento(ag_id: int):
     return supabase.table("agendamentos").delete().eq("id", ag_id).execute()
 
-def montar_link_whatsapp(nome, data_atendimento: date, horario, servico):
-    mensagem = (
-        "Olá! Barbára Vitória, quero CONFIRMAR meu agendamento:\n\n"
+
+def montar_mensagem_pagamento(nome, data_atendimento: date, horario, servico, valor_sinal: float):
+    total = float(PRECOS.get(servico, 0.0))
+    msg = (
+        "Olá! Quero reservar meu horário. 💅\n\n"
         f"👩 Cliente: {nome}\n"
         f"📅 Data: {data_atendimento.strftime('%d/%m/%Y')}\n"
         f"⏰ Horário: {horario}\n"
         f"💅 Serviço: {servico}\n\n"
-        "✅ Estou enviando esta mensagem para confirmar."
+        f"💰 Valor do serviço: {fmt_brl(total)}\n"
+        f"✅ Sinal para confirmar: {fmt_brl(valor_sinal)}\n\n"
+        "Pix para pagamento do sinal:\n"
+        f"🔑 Chave Pix: {PIX_CHAVE}\n"
+        f"👤 Nome: {PIX_NOME}\n"
+        f"🏙️ Cidade: {PIX_CIDADE}\n\n"
+        "📌 Assim que pagar, me envie o comprovante aqui para eu confirmar como PAGO. 🙏"
     )
-    text_encoded = urllib.parse.quote(mensagem, safe="")
+    return msg
+
+
+def montar_link_whatsapp(texto: str):
+    text_encoded = urllib.parse.quote(texto, safe="")
     return f"https://wa.me/{WHATSAPP_NUMERO}?text={text_encoded}"
 
-def copiar_para_clipboard(texto: str):
-    components.html(
-        f"<script>navigator.clipboard.writeText({json.dumps(texto)});</script>",
-        height=0
-    )
 
 def limpar_confirmacao():
     st.session_state.wa_link = None
     st.session_state.ultimo_ag = None
+    st.session_state.do_copy = False
+    st.session_state.copy_text = None
     st.rerun()
+
 
 # ======================
 # TABS
@@ -164,20 +283,26 @@ with aba_agendar:
     nome = st.text_input("Nome da cliente")
     data_atendimento = st.date_input("Data do atendimento", min_value=date.today())
 
-    # (1) BLOQUEAR DOMINGO
+    # BLOQUEAR DOMINGO
     if data_atendimento.weekday() == 6:
         st.error("Não atendemos aos domingos. Escolha outra data.")
         st.stop()
 
     servico = st.selectbox(
         "Tipo de serviço",
-        ["Alongamento em Gel", "Alongamento em Fibra de Vidro", "Pedicure", "Manutenção"]
+        list(PRECOS.keys())
     )
+
+    total_servico = float(PRECOS.get(servico, 0.0))
+    valor_sinal = calcular_sinal(servico)
+
+    # mini resumo de valores
+    st.caption(f"Valor do serviço: **{fmt_brl(total_servico)}** • Sinal para reservar: **{fmt_brl(valor_sinal)}**")
 
     horarios = ["07:00", "08:30", "10:00", "13:30", "15:00", "16:30", "18:00"]
     ocupados = horarios_ocupados(data_atendimento)
 
-    # (4) BLOQUEAR DIA LOTADO
+    # BLOQUEAR DIA LOTADO
     if len(ocupados) >= len(horarios):
         st.warning("Esse dia está sem vagas. Escolha outra data.")
         st.stop()
@@ -194,67 +319,84 @@ with aba_agendar:
 
     st.divider()
 
-    # ===== LINHA: AGENDAR + (se tiver) botões de WhatsApp =====
-    left, right1, right2, right3 = st.columns([1.2, 1, 1, 0.9])
+    # ===== LINHA: RESERVAR + botões auxiliares =====
+    left, r1, r2, r3 = st.columns([1.2, 1, 1, 0.9])
 
     with left:
-        agendar_click = st.button("✅ Agendar", use_container_width=True)
+        reservar_click = st.button("💳 Reservar e pagar sinal", use_container_width=True)
 
-    # Se já tem link, mostra botões na mesma linha
-    with right1:
+    with r1:
         if st.session_state.wa_link:
             st.link_button("📲 Abrir WhatsApp", st.session_state.wa_link, use_container_width=True)
         else:
             st.write("")
 
-    with right2:
-        if st.session_state.wa_link:
-            if st.button("📋 Copiar link", use_container_width=True):
-                st.session_state.do_copy = True
+    with r2:
+        if st.session_state.copy_text:
+            if st.button("📋 Copiar mensagem", use_container_width=True):
+                copiar_para_clipboard(st.session_state.copy_text)
+                st.toast("Mensagem copiada ✅", icon="📋")
         else:
             st.write("")
 
-    with right3:
+    with r3:
         if st.session_state.wa_link:
             st.button("🧹 Limpar", use_container_width=True, on_click=limpar_confirmacao)
         else:
             st.write("")
 
-    if st.session_state.do_copy and st.session_state.wa_link:
-        copiar_para_clipboard(st.session_state.wa_link)
-        st.toast("Link copiado ✅", icon="📋")
-        st.session_state.do_copy = False
+    # Botão extra para copiar Pix (abaixo, discreto)
+    if PIX_CHAVE and st.session_state.ultimo_ag:
+        if st.button("🔑 Copiar chave Pix", use_container_width=True):
+            copiar_para_clipboard(PIX_CHAVE)
+            st.toast("Chave Pix copiada ✅", icon="🔑")
 
-    # ===== AÇÃO DO AGENDAR =====
-    if agendar_click:
+    # ===== AÇÃO DO RESERVAR =====
+    if reservar_click:
         if not nome or not horario_escolhido:
-            st.error("Preencha todos os campos")
+            st.error("Preencha todos os campos.")
         else:
             # checa novamente (anti-corrida)
             if horario_escolhido in horarios_ocupados(data_atendimento):
                 st.error("Esse horário acabou de ser ocupado. Escolha outro.")
             else:
-                resp = inserir_agendamento(nome.strip(), data_atendimento, horario_escolhido, servico)
+                resp = inserir_pre_agendamento(
+                    nome.strip(),
+                    data_atendimento,
+                    horario_escolhido,
+                    servico,
+                    valor_sinal
+                )
+
                 if getattr(resp, "error", None):
                     st.error("Não foi possível salvar agora. Tente novamente.")
                 else:
-                    st.session_state.wa_link = montar_link_whatsapp(
-                        nome.strip(), data_atendimento, horario_escolhido, servico
+                    mensagem = montar_mensagem_pagamento(
+                        nome.strip(),
+                        data_atendimento,
+                        horario_escolhido,
+                        servico,
+                        valor_sinal
                     )
+                    st.session_state.copy_text = mensagem
+                    st.session_state.wa_link = montar_link_whatsapp(mensagem)
                     st.session_state.ultimo_ag = {
                         "cliente": nome.strip(),
                         "data": data_atendimento.strftime("%d/%m/%Y"),
                         "horario": horario_escolhido,
-                        "servico": servico
+                        "servico": servico,
+                        "sinal": valor_sinal,
+                        "status": "pendente"
                     }
-                    st.success("Agendamento registrado! Agora confirme no WhatsApp.")
+                    st.success("Reserva criada como **PENDENTE**. Agora envie a mensagem no WhatsApp e pague o sinal via Pix.")
                     st.rerun()
 
     # ===== RESUMO DISCRETO (abaixo) =====
     if st.session_state.ultimo_ag:
         u = st.session_state.ultimo_ag
         st.caption(
-            f"Último agendamento: **{u['cliente']}** • **{u['data']}** • **{u['horario']}** • **{u['servico']}**"
+            f"Última reserva: **{u['cliente']}** • **{u['data']}** • **{u['horario']}** • **{u['servico']}** • "
+            f"**{fmt_brl(float(u.get('sinal', 0.0)))}** • **{u.get('status', '').upper()}**"
         )
 
 # ======================
@@ -299,38 +441,73 @@ with aba_admin:
 
         df_admin = listar_agendamentos()
 
-        st.subheader("📋 Agendamentos")
+        st.subheader("📋 Agendamentos / Reservas")
 
-        filtrar = st.checkbox("Filtrar por data")
-        if filtrar:
+        colf1, colf2 = st.columns([1, 1])
+        with colf1:
+            filtrar_data = st.checkbox("Filtrar por data")
+        with colf2:
+            filtrar_status = st.checkbox("Filtrar por status")
+
+        if filtrar_data:
             data_filtro = st.date_input("Escolha a data", value=date.today(), key="filtro_admin")
             df_admin = df_admin[df_admin["Data"] == str(data_filtro)]
+
+        if filtrar_status:
+            status_sel = st.selectbox("Status", ["pendente", "pago"])
+            df_admin = df_admin[df_admin["Status"].str.lower() == status_sel]
 
         if df_admin.empty:
             st.info("Nenhum agendamento encontrado.")
         else:
-            st.dataframe(df_admin.drop(columns=["id"]), use_container_width=True)
+            # Mostra bonitinho
+            df_show = df_admin.copy()
+            df_show["Valor"] = df_show["Valor"].apply(lambda v: fmt_brl(float(v)))
+            st.dataframe(df_show.drop(columns=["id"]), use_container_width=True)
 
-            st.subheader("🗑️ Excluir um agendamento")
-            opcoes = df_admin.apply(
-                lambda r: f'#{r["id"]} | {r["Cliente"]} | {r["Data"]} | {r["Horário"]} | {r["Serviço"]}',
+            st.subheader("✅ Marcar como PAGO")
+            op_pagar = df_admin.apply(
+                lambda r: f'#{r["id"]} | {r["Cliente"]} | {r["Data"]} | {r["Horário"]} | {r["Serviço"]} | {r["Status"]}',
                 axis=1
             ).tolist()
 
-            escolha = st.selectbox("Selecione", opcoes)
+            escolha_pagar = st.selectbox("Selecione uma reserva/agendamento", op_pagar, key="sel_pagar")
+            if st.button("Marcar como PAGO ✅"):
+                ag_id = int(escolha_pagar.split("|")[0].replace("#", "").strip())
+                marcar_como_pago(ag_id)
+                st.success("Marcado como PAGO ✅")
+                st.rerun()
+
+            st.subheader("🗑️ Excluir")
+            op_excluir = df_admin.apply(
+                lambda r: f'#{r["id"]} | {r["Cliente"]} | {r["Data"]} | {r["Horário"]} | {r["Serviço"]} | {r["Status"]}',
+                axis=1
+            ).tolist()
+
+            escolha_exc = st.selectbox("Selecione", op_excluir, key="sel_exc")
             if st.button("Excluir ❌"):
-                ag_id = int(escolha.split("|")[0].replace("#", "").strip())
+                ag_id = int(escolha_exc.split("|")[0].replace("#", "").strip())
                 excluir_agendamento(ag_id)
-                st.success("Agendamento excluído ✅")
+                st.success("Excluído ✅")
                 st.rerun()
 
         st.subheader("⬇️ Baixar CSV")
-        st.download_button(
-            "Baixar agendamentos.csv",
-            df_admin.drop(columns=["id"]).to_csv(index=False).encode("utf-8"),
-            file_name="agendamentos.csv",
-            mime="text/csv"
-        )
+        if not df_admin.empty:
+            df_csv = df_admin.copy()
+            df_csv["Valor"] = df_csv["Valor"].apply(lambda v: fmt_brl(float(v)))
+            st.download_button(
+                "Baixar agendamentos.csv",
+                df_csv.drop(columns=["id"]).to_csv(index=False).encode("utf-8"),
+                file_name="agendamentos.csv",
+                mime="text/csv"
+            )
+        else:
+            st.download_button(
+                "Baixar agendamentos.csv",
+                pd.DataFrame().to_csv(index=False).encode("utf-8"),
+                file_name="agendamentos.csv",
+                mime="text/csv"
+            )
 
     else:
         with st.form("login_admin"):
