@@ -126,7 +126,7 @@ with aba_agendar:
 
     servico = st.selectbox(
         "Tipo de serviço",
-        ["Alongamento em Gel", "Alongamento em Fibra de Vidro", "Pedicure"]
+        ["Alongamento em Gel", "Alongamento em Fibra de Vidro", "Pedicure", "Manutenção"]
     )
 
     horarios = ["07:00", "08:30", "10:00", "13:30", "15:00", "16:30", "18:00"]
