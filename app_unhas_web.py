@@ -20,7 +20,7 @@ PIX_CHAVE = st.secrets.get("PIX_CHAVE", "")
 PIX_NOME = st.secrets.get("PIX_NOME", "Profissional")
 PIX_CIDADE = st.secrets.get("PIX_CIDADE", "BRASIL")
 
-# você quer 60 minutos
+# 60 minutos
 TEMPO_EXPIRACAO_MIN = int(st.secrets.get("TEMPO_EXPIRACAO_MIN", 60))
 
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
@@ -36,7 +36,6 @@ st.title("💅 Agendamento de Unhas")
 # ======================
 VALOR_SINAL_FIXO = 20.0
 
-# ✅ NOMES ATUALIZADOS + REMOVIDOS
 PRECOS = {
     "Alongamento em Gel": 130.0,
     "Manutenção – Gel": 100.0,
@@ -55,8 +54,40 @@ def fmt_brl(v: float) -> str:
     return f"R$ {s}"
 
 
-def calcular_sinal(_servico: str) -> float:
+def calcular_sinal(_servicos: list[str]) -> float:
+    # sinal fixo
     return float(VALOR_SINAL_FIXO)
+
+
+def normalizar_servicos(servicos: list[str]) -> list[str]:
+    return [s.strip() for s in servicos if s and s.strip()]
+
+
+def servicos_para_texto(servicos: list[str]) -> str:
+    # guarda no banco como texto simples
+    # exemplo: "Alongamento em Gel + Pedicure"
+    return " + ".join(normalizar_servicos(servicos))
+
+
+def texto_para_lista_servicos(texto: str) -> list[str]:
+    if not texto:
+        return []
+    # separa por "+"
+    parts = [p.strip() for p in texto.split("+")]
+    return [p for p in parts if p]
+
+
+def calcular_total_servicos(servicos: list[str]) -> float:
+    total = 0.0
+    for s in normalizar_servicos(servicos):
+        total += float(PRECOS.get(s, 0.0))
+    return float(total)
+
+
+def calcular_total_por_texto_servico(texto_servico: str) -> float:
+    # usado no admin (quando vem "A + B")
+    servs = texto_para_lista_servicos(texto_servico)
+    return calcular_total_servicos(servs)
 
 
 # ======================
@@ -111,7 +142,6 @@ if "wa_link" not in st.session_state:
 if "ultimo_ag" not in st.session_state:
     st.session_state.ultimo_ag = None
 
-# anti duplo clique / idempotência
 if "reservando" not in st.session_state:
     st.session_state.reservando = False
 
@@ -136,8 +166,9 @@ def agora_utc() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def make_reserva_key(nome: str, data_at: date, horario: str, servico: str) -> str:
-    return f"{nome.strip().lower()}|{data_at.isoformat()}|{horario}|{servico}"
+def make_reserva_key(nome: str, data_at: date, horario: str, servicos: list[str]) -> str:
+    serv_txt = servicos_para_texto(servicos).lower()
+    return f"{nome.strip().lower()}|{data_at.isoformat()}|{horario}|{serv_txt}"
 
 
 # ======================
@@ -156,13 +187,13 @@ def listar_agendamentos():
     df = pd.DataFrame(dados)
 
     if df.empty:
-        return pd.DataFrame(columns=["id", "Cliente", "Data", "Horário", "Serviço", "Status", "Sinal", "Criado em"])
+        return pd.DataFrame(columns=["id", "Cliente", "Data", "Horário", "Serviço(s)", "Status", "Sinal", "Criado em"])
 
     df.rename(columns={
         "cliente": "Cliente",
         "data": "Data",
         "horario": "Horário",
-        "servico": "Serviço",
+        "servico": "Serviço(s)",
         "status": "Status",
         "valor": "Sinal",
         "created_at": "Criado em"
@@ -243,14 +274,14 @@ def cliente_ja_agendou_no_dia(cliente: str, data_escolhida: date) -> bool:
         return False
 
 
-def inserir_pre_agendamento(cliente, data_escolhida: date, horario, servico, valor_sinal: float):
+def inserir_pre_agendamento(cliente, data_escolhida: date, horario, servicos: list[str], valor_sinal: float):
     limpar_pendentes_expirados()
 
     payload = {
         "cliente": cliente,
         "data": data_escolhida.isoformat(),
         "horario": horario,
-        "servico": servico,
+        "servico": servicos_para_texto(servicos),
         "status": "pendente",
         "valor": valor_sinal
     }
@@ -281,15 +312,20 @@ def excluir_agendamento(ag_id: int):
     return supabase.table("agendamentos").delete().eq("id", ag_id).execute()
 
 
-def montar_mensagem_pagamento(nome, data_atendimento: date, horario, servico, valor_sinal: float):
-    total = float(PRECOS.get(servico, 0.0))
+def montar_mensagem_pagamento(nome, data_atendimento: date, horario, servicos: list[str], valor_sinal: float):
+    servs = normalizar_servicos(servicos)
+    total = calcular_total_servicos(servs)
+
+    lista = "\n".join([f"• {s} ({fmt_brl(PRECOS.get(s, 0.0))})" for s in servs]) if servs else "-"
+
     msg = (
         "Olá! Quero reservar meu horário. 💅\n\n"
         f"👩 Cliente: {nome}\n"
         f"📅 Data: {data_atendimento.strftime('%d/%m/%Y')}\n"
         f"⏰ Horário: {horario}\n"
-        f"💅 Serviço: {servico}\n\n"
-        f"💰 Valor do serviço: {fmt_brl(total)}\n"
+        "💅 Serviço(s):\n"
+        f"{lista}\n\n"
+        f"💰 Total dos serviços: {fmt_brl(total)}\n"
         f"✅ Sinal para confirmar: {fmt_brl(valor_sinal)}\n\n"
         "Pix para pagamento do sinal:\n"
         f"🔑 Chave Pix: {PIX_CHAVE}\n"
@@ -325,11 +361,21 @@ with aba_agendar:
     if eh_domingo:
         st.warning("Não atendemos aos domingos. Escolha outra data para agendar.")
 
-    servico = st.selectbox("Tipo de serviço", list(PRECOS.keys()))
+    # ✅ Agora pode escolher mais de 1 serviço
+    servicos_escolhidos = st.multiselect(
+        "Tipo de serviço (pode escolher mais de um)",
+        options=list(PRECOS.keys()),
+        default=[]
+    )
+    servicos_escolhidos = normalizar_servicos(servicos_escolhidos)
 
-    total_servico = float(PRECOS.get(servico, 0.0))
-    valor_sinal = calcular_sinal(servico)
-    st.caption(f"Valor do serviço: **{fmt_brl(total_servico)}** • Sinal para reservar: **{fmt_brl(valor_sinal)}**")
+    total_servico = calcular_total_servicos(servicos_escolhidos)
+    valor_sinal = calcular_sinal(servicos_escolhidos)
+
+    if servicos_escolhidos:
+        st.caption(f"Total dos serviços: **{fmt_brl(total_servico)}** • Sinal para reservar: **{fmt_brl(valor_sinal)}**")
+    else:
+        st.caption(f"Sinal para reservar: **{fmt_brl(valor_sinal)}**")
 
     horarios = horarios_do_dia(data_atendimento)
 
@@ -356,6 +402,7 @@ with aba_agendar:
     pode_agendar = (
         (not eh_domingo)
         and bool(disponiveis)
+        and bool(servicos_escolhidos)
         and (not st.session_state.reservando)
     )
 
@@ -377,12 +424,12 @@ with aba_agendar:
             st.toast(f"Chave Pix: {PIX_CHAVE}", icon="🔑")
 
     if reservar_click:
-        if not nome or not horario_escolhido:
-            st.error("Preencha todos os campos.")
+        if not nome or not horario_escolhido or not servicos_escolhidos:
+            st.error("Preencha todos os campos e selecione pelo menos 1 serviço.")
         else:
             st.session_state.reservando = True
 
-            chave = make_reserva_key(nome, data_atendimento, horario_escolhido, servico)
+            chave = make_reserva_key(nome, data_atendimento, horario_escolhido, servicos_escolhidos)
             if st.session_state.ultima_chave_reserva == chave:
                 st.warning("Você já enviou esse agendamento. Se quiser mudar, fale com a profissional.")
                 st.session_state.reservando = False
@@ -399,7 +446,7 @@ with aba_agendar:
                             nome.strip(),
                             data_atendimento,
                             horario_escolhido,
-                            servico,
+                            servicos_escolhidos,
                             valor_sinal
                         )
 
@@ -410,7 +457,7 @@ with aba_agendar:
                                 nome.strip(),
                                 data_atendimento,
                                 horario_escolhido,
-                                servico,
+                                servicos_escolhidos,
                                 valor_sinal
                             )
                             st.session_state.wa_link = montar_link_whatsapp(mensagem)
@@ -418,7 +465,7 @@ with aba_agendar:
                                 "cliente": nome.strip(),
                                 "data": data_atendimento.strftime("%d/%m/%Y"),
                                 "horario": horario_escolhido,
-                                "servico": servico,
+                                "servicos": servicos_para_texto(servicos_escolhidos),
                                 "sinal": valor_sinal,
                                 "status": "pendente"
                             }
@@ -430,8 +477,8 @@ with aba_agendar:
     if st.session_state.ultimo_ag:
         u = st.session_state.ultimo_ag
         st.caption(
-            f"Última reserva: **{u['cliente']}** • **{u['data']}** • **{u['horario']}** • **{u['servico']}** • "
-            f"**{fmt_brl(float(u.get('sinal', 0.0)))}** • **{u.get('status', '').upper()}**"
+            f"Última reserva: **{u['cliente']}** • **{u['data']}** • **{u['horario']}** • "
+            f"**{u.get('servicos','')}** • **{fmt_brl(float(u.get('sinal', 0.0)))}** • **{u.get('status', '').upper()}**"
         )
 
 # ======================
@@ -480,23 +527,25 @@ with aba_admin:
         if df_admin.empty:
             st.info("Nenhum agendamento encontrado.")
         else:
-            # ===== ENRIQUECE COM PREÇO DO SERVIÇO =====
             df_admin["Data_dt"] = pd.to_datetime(df_admin["Data"], errors="coerce")
-            df_admin["Preço do serviço"] = df_admin["Serviço"].map(PRECOS).fillna(0.0).astype(float)
 
-            # ===== FILTRO DE PERÍODO (TUDO / MÊS / ANO) =====
+            # ✅ preço somando múltiplos serviços
+            df_admin["Preço do serviço"] = df_admin["Serviço(s)"].apply(calcular_total_por_texto_servico).astype(float)
+
+            # ===== FILTRO DE PERÍODO =====
             colp1, colp2, colp3 = st.columns([1, 1, 1])
             with colp1:
                 periodo = st.selectbox("Período", ["Tudo", "Mês", "Ano"], index=0)
 
-            anos_disponiveis = sorted(
-                [int(y) for y in df_admin["Data_dt"].dropna().dt.year.unique().tolist()]
-            )
+            anos_disponiveis = sorted([int(y) for y in df_admin["Data_dt"].dropna().dt.year.unique().tolist()])
             ano_padrao = anos_disponiveis[-1] if anos_disponiveis else date.today().year
 
             with colp2:
-                ano_sel = st.selectbox("Ano", anos_disponiveis if anos_disponiveis else [ano_padrao],
-                                       index=(len(anos_disponiveis)-1) if anos_disponiveis else 0)
+                ano_sel = st.selectbox(
+                    "Ano",
+                    anos_disponiveis if anos_disponiveis else [ano_padrao],
+                    index=(len(anos_disponiveis) - 1) if anos_disponiveis else 0
+                )
 
             with colp3:
                 mes_sel = st.selectbox("Mês", list(range(1, 13)), index=date.today().month - 1)
@@ -511,13 +560,11 @@ with aba_admin:
             elif periodo == "Ano":
                 df_filtrado = df_filtrado[df_filtrado["Data_dt"].dt.year == int(ano_sel)]
 
-            # ===== FILTRO DE STATUS (opcional) =====
             filtrar_status = st.checkbox("Filtrar por status")
             if filtrar_status:
                 status_sel = st.selectbox("Status", ["pendente", "pago"])
                 df_filtrado = df_filtrado[df_filtrado["Status"].str.lower() == status_sel]
 
-            # ===== TOTAIS DO PERÍODO =====
             total_servicos = float(df_filtrado["Preço do serviço"].sum()) if not df_filtrado.empty else 0.0
             total_sinais = float(df_filtrado["Sinal"].sum()) if not df_filtrado.empty else 0.0
             qtd = int(len(df_filtrado))
@@ -527,7 +574,6 @@ with aba_admin:
             c2.metric("Total serviços", fmt_brl(total_servicos))
             c3.metric("Total sinais", fmt_brl(total_sinais))
 
-            # ===== TABELA =====
             df_show = df_filtrado.drop(columns=["Data_dt"]).copy()
             df_show["Preço do serviço"] = df_show["Preço do serviço"].apply(lambda v: fmt_brl(float(v)))
             df_show["Sinal"] = df_show["Sinal"].apply(lambda v: fmt_brl(float(v)))
@@ -536,10 +582,9 @@ with aba_admin:
 
             st.divider()
 
-            # ===== AÇÕES =====
             st.subheader("✅ Marcar como PAGO")
             op_pagar = df_filtrado.apply(
-                lambda r: f'#{r["id"]} | {r["Cliente"]} | {r["Data"]} | {r["Horário"]} | {r["Serviço"]} | {r["Status"]}',
+                lambda r: f'#{r["id"]} | {r["Cliente"]} | {r["Data"]} | {r["Horário"]} | {r["Serviço(s)"]} | {r["Status"]}',
                 axis=1
             ).tolist()
 
@@ -555,7 +600,7 @@ with aba_admin:
 
             st.subheader("🗑️ Excluir")
             op_excluir = df_filtrado.apply(
-                lambda r: f'#{r["id"]} | {r["Cliente"]} | {r["Data"]} | {r["Horário"]} | {r["Serviço"]} | {r["Status"]}',
+                lambda r: f'#{r["id"]} | {r["Cliente"]} | {r["Data"]} | {r["Horário"]} | {r["Serviço(s)"]} | {r["Status"]}',
                 axis=1
             ).tolist()
 
