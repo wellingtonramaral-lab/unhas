@@ -37,18 +37,16 @@ st.title("💅 Agendamento de Unhas")
 VALOR_SINAL_FIXO = 20.0
 
 PRECOS = {
-    "Unha em Gel": 130.0,
+    "Alongamento em Gel": 130.0,
     "Manutenção – Gel": 100.0,
 
-    "Unha Fibra de Vidro": 150.0,
+    "Fibra de Vidro": 150.0,
     "Manutenção – Fibra": 110.0,
 
     "Pedicure": 50.0,
-    "Manutenção – Pedicure": 50.0,
-
     "Banho de Gel": 100.0,
-    "Manutenção – Banho de Gel": 100.0,
 }
+
 
 
 def fmt_brl(v: float) -> str:
@@ -59,6 +57,18 @@ def fmt_brl(v: float) -> str:
 
 def calcular_sinal(_servico: str) -> float:
     return float(VALOR_SINAL_FIXO)
+
+
+# ======================
+# HORÁRIOS POR DIA (NOVO)
+# ======================
+def horarios_do_dia(d: date) -> list[str]:
+    wd = d.weekday()  # 0=seg ... 5=sab ... 6=dom
+    if wd in [0, 1, 2, 3, 4]:  # seg-sex
+        return ["18:00"]
+    if wd == 5:  # sábado
+        return ["10:30", "14:00", "18:00"]
+    return []  # domingo
 
 
 # ======================
@@ -335,23 +345,35 @@ with aba_agendar:
     valor_sinal = calcular_sinal(servico)
     st.caption(f"Valor do serviço: **{fmt_brl(total_servico)}** • Sinal para reservar: **{fmt_brl(valor_sinal)}**")
 
-    horarios = ["07:00", "08:30", "10:00", "13:30", "15:00", "16:30", "18:00"]
+    # ===== HORÁRIOS NOVOS =====
+    horarios = horarios_do_dia(data_atendimento)
 
-    ocupados = horarios_ocupados(data_atendimento) if not eh_domingo else set()
-    dia_lotado = (len(ocupados) >= len(horarios)) if not eh_domingo else False
+    # se for domingo (ou não tiver horário), não consulta e não quebra outras abas
+    if eh_domingo or not horarios:
+        ocupados = set()
+        disponiveis = []
+    else:
+        ocupados = horarios_ocupados(data_atendimento)
+        disponiveis = [h for h in horarios if h not in ocupados]
 
-    if dia_lotado:
-        st.warning("Esse dia está sem vagas. Escolha outra data.")
-
-    disponiveis = [h for h in horarios if h not in ocupados] if not eh_domingo else horarios
+    if (not eh_domingo) and horarios and (not disponiveis):
+        st.info("Sem horários disponíveis para esse dia. Escolha outra data.")
 
     st.markdown("**Horários disponíveis**")
-    with st.container(height=180):
-        horario_escolhido = st.radio("Escolha um horário", disponiveis, label_visibility="collapsed")
+
+    if disponiveis:
+        with st.container(height=140):
+            horario_escolhido = st.radio("Escolha um horário", disponiveis, label_visibility="collapsed")
+    else:
+        horario_escolhido = None
 
     st.divider()
 
-    pode_agendar = (not eh_domingo) and (not dia_lotado) and (not st.session_state.reservando)
+    pode_agendar = (
+        (not eh_domingo)
+        and bool(disponiveis)
+        and (not st.session_state.reservando)
+    )
 
     left, right = st.columns([1.2, 1])
 
@@ -366,10 +388,10 @@ with aba_agendar:
         if st.session_state.wa_link:
             st.link_button("📲 Abrir WhatsApp", st.session_state.wa_link, use_container_width=True)
 
-    # Botão de Pix (mantive)
+    # (opcional) Pix
     if PIX_CHAVE and st.session_state.wa_link:
-        if st.button("🔑 Copiar chave Pix", use_container_width=True):
-            st.toast("Chave Pix (copie manualmente): " + PIX_CHAVE, icon="🔑")
+        if st.button("🔑 Ver chave Pix", use_container_width=True):
+            st.toast(f"Chave Pix: {PIX_CHAVE}", icon="🔑")
 
     # ===== AÇÃO DO RESERVAR =====
     if reservar_click:
