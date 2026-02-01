@@ -169,9 +169,48 @@ with aba_agendar:
         st.divider()
         st.subheader("📲 Passo 1: Envie a confirmação no WhatsApp")
 
-        st.link_button("Abrir WhatsApp para confirmar", st.session_state.wa_link)
-        st.caption("Se não abrir, copie e cole este link no navegador:")
-        st.code(st.session_state.wa_link)
+        st.markdown(
+    f"""
+    <div style="
+        display:flex;
+        gap:12px;
+        flex-wrap:wrap;
+        margin-top:10px;
+    ">
+        <a href="{st.session_state.wa_link}" target="_blank"
+           style="text-decoration:none;">
+            <button style="
+                background-color:#25D366;
+                color:white;
+                padding:12px 18px;
+                border:none;
+                border-radius:8px;
+                font-size:16px;
+                cursor:pointer;
+            ">
+                📲 Abrir WhatsApp
+            </button>
+        </a>
+
+        <button onclick="navigator.clipboard.writeText('{st.session_state.wa_link}')"
+            style="
+                background-color:#f0f0f0;
+                color:#333;
+                padding:12px 18px;
+                border:1px solid #ccc;
+                border-radius:8px;
+                font-size:16px;
+                cursor:pointer;
+            ">
+            📋 Copiar link
+        </button>
+    </div>
+    """,
+    unsafe_allow_html=True
+)
+
+st.caption("Se o WhatsApp não abrir automaticamente, use o botão **Copiar link**.")
+
 
         st.subheader("✅ Passo 2: Depois de enviar no WhatsApp, clique abaixo para finalizar")
         col1, col2 = st.columns(2)
