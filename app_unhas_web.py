@@ -22,8 +22,8 @@ PIX_CHAVE = st.secrets.get("PIX_CHAVE", "")
 PIX_NOME = st.secrets.get("PIX_NOME", "Profissional")
 PIX_CIDADE = st.secrets.get("PIX_CIDADE", "BRASIL")
 
-# Se quiser expirar reserva pendente (ex: 30 min). Coloque 0 para NÃO expirar.
-TEMPO_EXPIRACAO_MIN = int(st.secrets.get("TEMPO_EXPIRACAO_MIN", 30))
+# 60 minutos (você disse que vai manter)
+TEMPO_EXPIRACAO_MIN = int(st.secrets.get("TEMPO_EXPIRACAO_MIN", 60))
 
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
@@ -106,7 +106,7 @@ if "ultimo_ag" not in st.session_state:
 if "copy_text" not in st.session_state:
     st.session_state.copy_text = None
 
-# Anti-duplo clique / idempotência
+# anti duplo clique / idempotência
 if "reservando" not in st.session_state:
     st.session_state.reservando = False
 
@@ -187,11 +187,30 @@ def listar_agendamentos():
     return df
 
 
+def limpar_pendentes_expirados():
+    """
+    Remove do banco os 'pendente' vencidos para NÃO travar o índice unique (data, horario)
+    quando o app considerar o horário novamente disponível.
+    """
+    if TEMPO_EXPIRACAO_MIN <= 0:
+        return
+
+    cutoff_dt = agora_utc() - timedelta(minutes=TEMPO_EXPIRACAO_MIN)
+    cutoff_iso = cutoff_dt.isoformat()
+
+    # delete pendentes vencidos
+    supabase.table("agendamentos") \
+        .delete() \
+        .eq("status", "pendente") \
+        .lt("created_at", cutoff_iso) \
+        .execute()
+
+
 def horarios_ocupados(data_escolhida: date):
     """
     Considera ocupado:
     - status = 'pago'
-    - status = 'pendente' e (se TEMPO_EXPIRACAO_MIN > 0) ainda não expirou
+    - status = 'pendente' e ainda não expirou (60 min)
     """
     resp = (
         supabase
@@ -219,7 +238,6 @@ def horarios_ocupados(data_escolhida: date):
                 ocupados.add(horario)
             else:
                 if created_at is None:
-                    # se não der pra parsear, por segurança bloqueia
                     ocupados.add(horario)
                 else:
                     if created_at.tzinfo is None:
@@ -230,7 +248,31 @@ def horarios_ocupados(data_escolhida: date):
     return set(ocupados)
 
 
+def cliente_ja_agendou_no_dia(cliente: str, data_escolhida: date) -> bool:
+    """
+    Trava no APP: mesmo cliente não agenda 2x no mesmo dia.
+    (O ideal é ter o índice agendamento_cliente_dia no banco também.)
+    """
+    try:
+        resp = (
+            supabase
+            .table("agendamentos")
+            .select("id")
+            .eq("data", data_escolhida.isoformat())
+            .ilike("cliente", cliente.strip())  # compara ignorando caixa
+            .limit(1)
+            .execute()
+        )
+        return bool(resp.data)
+    except Exception:
+        # se falhar por qualquer motivo, não bloqueia aqui (deixa o banco decidir)
+        return False
+
+
 def inserir_pre_agendamento(cliente, data_escolhida: date, horario, servico, valor_sinal: float):
+    # garante que pendentes vencidos não vão travar o índice unique
+    limpar_pendentes_expirados()
+
     payload = {
         "cliente": cliente,
         "data": data_escolhida.isoformat(),
@@ -243,16 +285,20 @@ def inserir_pre_agendamento(cliente, data_escolhida: date, horario, servico, val
     try:
         return supabase.table("agendamentos").insert(payload).execute()
     except APIError as e:
-        msg = str(e)
+        msg = str(e).lower()
 
-        # caso comum: duplicidade (índice único data+horario)
-        if "duplicate key" in msg.lower() or "23505" in msg:
+        # duplicidade horário (data+horario)
+        if "agendamento_unico" in msg or "duplicate key" in msg or "23505" in msg:
+            # pode ser também cliente+dia. vamos tentar diferenciar:
+            if "cliente_norm" in msg or "agendamento_cliente_dia" in msg:
+                st.warning("Você já fez um agendamento para esse dia. Se quiser mudar, fale com a profissional.")
+                return None
+
             st.warning("Esse horário já foi reservado. Escolha outro.")
             return None
 
-        # Mostra erro real (para você me mandar)
         st.error("Erro ao salvar no Supabase. Copie e me envie essa mensagem:")
-        st.code(msg)
+        st.code(str(e))
         return None
 
 
@@ -316,7 +362,6 @@ with aba_agendar:
 
     horarios = ["07:00", "08:30", "10:00", "13:30", "15:00", "16:30", "18:00"]
 
-    # não consulta supabase se for domingo (mas também não trava outras abas)
     ocupados = horarios_ocupados(data_atendimento) if not eh_domingo else set()
     dia_lotado = (len(ocupados) >= len(horarios)) if not eh_domingo else False
 
@@ -374,48 +419,54 @@ with aba_agendar:
         else:
             st.session_state.reservando = True
 
+            # trava idempotência (mesmo clique/mesmo agendamento repetido)
             chave = make_reserva_key(nome, data_atendimento, horario_escolhido, servico)
             if st.session_state.ultima_chave_reserva == chave:
                 st.warning("Você já enviou esse agendamento. Se precisar, clique em Limpar e tente novamente.")
                 st.session_state.reservando = False
             else:
-                # checa de novo (anti-corrida)
-                if horario_escolhido in horarios_ocupados(data_atendimento):
-                    st.error("Esse horário acabou de ser ocupado. Escolha outro.")
+                # trava: cliente não pode agendar 2x no mesmo dia
+                if cliente_ja_agendou_no_dia(nome, data_atendimento):
+                    st.warning("Você já fez um agendamento para esse dia. Se quiser mudar, fale com a profissional.")
                     st.session_state.reservando = False
                 else:
-                    resp = inserir_pre_agendamento(
-                        nome.strip(),
-                        data_atendimento,
-                        horario_escolhido,
-                        servico,
-                        valor_sinal
-                    )
-
-                    if resp is None:
+                    # checa de novo (anti-corrida)
+                    if horario_escolhido in horarios_ocupados(data_atendimento):
+                        st.warning("Esse horário já foi reservado. Escolha outro.")
                         st.session_state.reservando = False
                     else:
-                        mensagem = montar_mensagem_pagamento(
+                        resp = inserir_pre_agendamento(
                             nome.strip(),
                             data_atendimento,
                             horario_escolhido,
                             servico,
                             valor_sinal
                         )
-                        st.session_state.copy_text = mensagem
-                        st.session_state.wa_link = montar_link_whatsapp(mensagem)
-                        st.session_state.ultimo_ag = {
-                            "cliente": nome.strip(),
-                            "data": data_atendimento.strftime("%d/%m/%Y"),
-                            "horario": horario_escolhido,
-                            "servico": servico,
-                            "sinal": valor_sinal,
-                            "status": "pendente"
-                        }
-                        st.session_state.ultima_chave_reserva = chave
-                        st.session_state.reservando = False
-                        st.success("Reserva criada como **PENDENTE**. Envie a mensagem no WhatsApp e pague o sinal via Pix.")
-                        st.rerun()
+
+                        if resp is None:
+                            st.session_state.reservando = False
+                        else:
+                            mensagem = montar_mensagem_pagamento(
+                                nome.strip(),
+                                data_atendimento,
+                                horario_escolhido,
+                                servico,
+                                valor_sinal
+                            )
+                            st.session_state.copy_text = mensagem
+                            st.session_state.wa_link = montar_link_whatsapp(mensagem)
+                            st.session_state.ultimo_ag = {
+                                "cliente": nome.strip(),
+                                "data": data_atendimento.strftime("%d/%m/%Y"),
+                                "horario": horario_escolhido,
+                                "servico": servico,
+                                "sinal": valor_sinal,
+                                "status": "pendente"
+                            }
+                            st.session_state.ultima_chave_reserva = chave
+                            st.session_state.reservando = False
+                            st.success("Reserva criada como **PENDENTE**. Envie a mensagem no WhatsApp e pague o sinal via Pix.")
+                            st.rerun()
 
     if st.session_state.ultimo_ag:
         u = st.session_state.ultimo_ag
