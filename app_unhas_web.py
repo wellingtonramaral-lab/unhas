@@ -6,6 +6,8 @@ from supabase import create_client
 import fitz  # PyMuPDF
 import json
 import streamlit.components.v1 as components
+from PIL import Image
+import io
 
 # ======================
 # SECRETS
@@ -24,18 +26,34 @@ st.set_page_config(page_title="Agendamento de Unhas 💅", layout="centered")
 st.title("💅 Agendamento de Unhas")
 
 # ======================
-# CATÁLOGO PDF → IMAGENS
+# CATÁLOGO PDF → IMAGENS (FIX: FUNDO BRANCO)
 # ======================
 CATALOGO_PDF = "catalogo.pdf"
 
 @st.cache_data(show_spinner=False)
-def pdf_para_imagens(caminho_pdf: str, zoom: float = 2.0):
+def pdf_para_imagens_com_fundo_branco(caminho_pdf: str, zoom: float = 2.0):
+    """
+    Converte cada página do PDF em PNG.
+    FIX catálogo preto: renderiza com alpha e depois "cola" em fundo branco.
+    """
     doc = fitz.open(caminho_pdf)
     imagens = []
     mat = fitz.Matrix(zoom, zoom)
+
     for page in doc:
-        pix = page.get_pixmap(matrix=mat, alpha=False)
-        imagens.append(pix.tobytes("png"))
+        # alpha=True para pegar transparência
+        pix = page.get_pixmap(matrix=mat, alpha=True)
+        png_bytes = pix.tobytes("png")
+
+        # Composita em fundo branco (evita ficar tudo preto)
+        img = Image.open(io.BytesIO(png_bytes)).convert("RGBA")
+        bg = Image.new("RGBA", img.size, (255, 255, 255, 255))
+        out = Image.alpha_composite(bg, img).convert("RGB")
+
+        buf = io.BytesIO()
+        out.save(buf, format="PNG", optimize=True)
+        imagens.append(buf.getvalue())
+
     doc.close()
     return imagens
 
@@ -45,11 +63,13 @@ def pdf_para_imagens(caminho_pdf: str, zoom: float = 2.0):
 if "admin_logado" not in st.session_state:
     st.session_state.admin_logado = False
 
+# link do whatsapp após agendar
 if "wa_link" not in st.session_state:
     st.session_state.wa_link = None
 
-if "wa_scheme" not in st.session_state:
-    st.session_state.wa_scheme = None
+# resumo do último agendamento
+if "ultimo_ag" not in st.session_state:
+    st.session_state.ultimo_ag = None
 
 if "do_copy" not in st.session_state:
     st.session_state.do_copy = False
@@ -105,8 +125,8 @@ def inserir_agendamento(cliente, data_escolhida: date, horario, servico):
 def excluir_agendamento(ag_id: int):
     return supabase.table("agendamentos").delete().eq("id", ag_id).execute()
 
-def montar_mensagem(nome, data_atendimento: date, horario, servico):
-    return (
+def montar_link_whatsapp(nome, data_atendimento: date, horario, servico):
+    mensagem = (
         "Olá! Barbára Vitória, quero CONFIRMAR meu agendamento:\n\n"
         f"👩 Cliente: {nome}\n"
         f"📅 Data: {data_atendimento.strftime('%d/%m/%Y')}\n"
@@ -114,12 +134,8 @@ def montar_mensagem(nome, data_atendimento: date, horario, servico):
         f"💅 Serviço: {servico}\n\n"
         "✅ Estou enviando esta mensagem para confirmar."
     )
-
-def montar_links_whatsapp(mensagem: str):
     text_encoded = urllib.parse.quote(mensagem, safe="")
-    url_web = f"https://wa.me/{WHATSAPP_NUMERO}?text={text_encoded}"
-    url_scheme = f"whatsapp://send?phone={WHATSAPP_NUMERO}&text={text_encoded}"
-    return url_web, url_scheme
+    return f"https://wa.me/{WHATSAPP_NUMERO}?text={text_encoded}"
 
 def copiar_para_clipboard(texto: str):
     components.html(
@@ -129,7 +145,7 @@ def copiar_para_clipboard(texto: str):
 
 def limpar_confirmacao():
     st.session_state.wa_link = None
-    st.session_state.wa_scheme = None
+    st.session_state.ultimo_ag = None
     st.rerun()
 
 # ======================
@@ -145,62 +161,6 @@ aba_agendar, aba_catalogo, aba_admin = st.tabs(
 with aba_agendar:
     st.subheader("Agende seu horário")
 
-    # ======================
-    # SE JÁ AGENDOU: MOSTRA CARD E ESCONDE FORM
-    # ======================
-    if st.session_state.wa_link:
-        st.success("Agendamento registrado ✅ Agora envie a confirmação no WhatsApp 👇")
-
-        st.markdown(
-            """
-            <div style="
-                border:1px solid #e6e6e6;
-                border-radius:14px;
-                padding:16px;
-                margin-top:10px;
-                background:#ffffff;
-            ">
-              <div style="font-size:18px;font-weight:700;margin-bottom:8px;">
-                📲 Enviar confirmação
-              </div>
-              <div style="color:#666;margin-bottom:12px;">
-                Toque no botão abaixo para abrir o WhatsApp com a mensagem pronta.
-              </div>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
-
-        c1, c2 = st.columns(2)
-
-        with c1:
-            st.link_button("📲 Abrir WhatsApp agora", st.session_state.wa_link)
-
-        with c2:
-            if st.button("📋 Copiar link"):
-                st.session_state.do_copy = True
-
-        if st.session_state.do_copy:
-            copiar_para_clipboard(st.session_state.wa_link)
-            st.toast("Link copiado ✅", icon="📋")
-            st.session_state.do_copy = False
-
-        st.caption("Se não abrir, copie o link e cole no navegador.")
-        st.markdown("**Tentar abrir direto no app (opcional):**", help="Pode funcionar dependendo do iPhone/navegador.")
-        st.markdown(
-            f'<a href="{st.session_state.wa_scheme}" style="text-decoration:none;">'
-            f'<button style="padding:10px 14px;border-radius:10px;border:1px solid #ccc;cursor:pointer;">'
-            f'📱 Abrir no app (tentativa)'
-            f'</button></a>',
-            unsafe_allow_html=True
-        )
-
-        st.button("🔁 Novo agendamento / Limpar confirmação", on_click=limpar_confirmacao)
-        st.stop()
-
-    # ======================
-    # FORM NORMAL (SÓ APARECE SE NÃO TIVER wa_link)
-    # ======================
     nome = st.text_input("Nome da cliente")
     data_atendimento = st.date_input("Data do atendimento", min_value=date.today())
 
@@ -233,30 +193,69 @@ with aba_agendar:
         )
 
     st.divider()
-    st.subheader("📲 Confirmação")
 
-    # Botão principal: agénda e mostra card do WhatsApp
-    if st.button("📲 Agendar e abrir WhatsApp"):
+    # ===== LINHA: AGENDAR + (se tiver) botões de WhatsApp =====
+    left, right1, right2, right3 = st.columns([1.2, 1, 1, 0.9])
+
+    with left:
+        agendar_click = st.button("✅ Agendar", use_container_width=True)
+
+    # Se já tem link, mostra botões na mesma linha
+    with right1:
+        if st.session_state.wa_link:
+            st.link_button("📲 Abrir WhatsApp", st.session_state.wa_link, use_container_width=True)
+        else:
+            st.write("")
+
+    with right2:
+        if st.session_state.wa_link:
+            if st.button("📋 Copiar link", use_container_width=True):
+                st.session_state.do_copy = True
+        else:
+            st.write("")
+
+    with right3:
+        if st.session_state.wa_link:
+            st.button("🧹 Limpar", use_container_width=True, on_click=limpar_confirmacao)
+        else:
+            st.write("")
+
+    if st.session_state.do_copy and st.session_state.wa_link:
+        copiar_para_clipboard(st.session_state.wa_link)
+        st.toast("Link copiado ✅", icon="📋")
+        st.session_state.do_copy = False
+
+    # ===== AÇÃO DO AGENDAR =====
+    if agendar_click:
         if not nome or not horario_escolhido:
             st.error("Preencha todos os campos")
         else:
-            # checa novamente (anti corrida)
+            # checa novamente (anti-corrida)
             if horario_escolhido in horarios_ocupados(data_atendimento):
                 st.error("Esse horário acabou de ser ocupado. Escolha outro.")
             else:
                 resp = inserir_agendamento(nome.strip(), data_atendimento, horario_escolhido, servico)
-
                 if getattr(resp, "error", None):
                     st.error("Não foi possível salvar agora. Tente novamente.")
                 else:
-                    msg = montar_mensagem(nome.strip(), data_atendimento, horario_escolhido, servico)
-                    url_web, url_scheme = montar_links_whatsapp(msg)
-
-                    st.session_state.wa_link = url_web
-                    st.session_state.wa_scheme = url_scheme
-
-                    st.success("Agendamento registrado! ✅")
+                    st.session_state.wa_link = montar_link_whatsapp(
+                        nome.strip(), data_atendimento, horario_escolhido, servico
+                    )
+                    st.session_state.ultimo_ag = {
+                        "cliente": nome.strip(),
+                        "data": data_atendimento.strftime("%d/%m/%Y"),
+                        "horario": horario_escolhido,
+                        "servico": servico
+                    }
+                    st.success("Agendamento registrado! Agora confirme no WhatsApp.")
                     st.rerun()
+
+    # ===== RESUMO DISCRETO (abaixo) =====
+    if st.session_state.ultimo_ag:
+        u = st.session_state.ultimo_ag
+        st.caption(
+            f"Último agendamento: **{u['cliente']}** • **{u['data']}** • **{u['horario']}** • **{u['servico']}**"
+        )
 
 # ======================
 # ABA: CATÁLOGO
@@ -277,11 +276,11 @@ with aba_catalogo:
         st.stop()
 
     with st.spinner("Carregando catálogo..."):
-        paginas = pdf_para_imagens(CATALOGO_PDF)
+        paginas = pdf_para_imagens_com_fundo_branco(CATALOGO_PDF, zoom=2.0)
 
-    for i, img in enumerate(paginas, start=1):
+    for i, img_bytes in enumerate(paginas, start=1):
         st.markdown(f"**Página {i}**")
-        st.image(img, use_container_width=True)
+        st.image(img_bytes, use_container_width=True)
 
 # ======================
 # ABA: ADMIN
