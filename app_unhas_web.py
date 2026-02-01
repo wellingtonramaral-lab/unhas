@@ -51,6 +51,9 @@ if "pendente" not in st.session_state:
 if "wa_link" not in st.session_state:
     st.session_state.wa_link = None
 
+if "do_copy" not in st.session_state:
+    st.session_state.do_copy = False
+
 # ======================
 # FUNÇÕES SUPABASE
 # ======================
@@ -115,9 +118,12 @@ def montar_link_whatsapp(nome, data_atendimento: date, horario, servico):
     return f"https://api.whatsapp.com/send?phone={WHATSAPP_NUMERO}&text={mensagem_url}"
 
 def copiar_para_clipboard(texto: str):
-    # dispara JS invisível (não aparece nada na tela)
     components.html(
-        f"<script>navigator.clipboard.writeText({json.dumps(texto)});</script>",
+        f"""
+        <script>
+          navigator.clipboard.writeText({json.dumps(texto)});
+        </script>
+        """,
         height=0
     )
 
@@ -129,7 +135,7 @@ aba_agendar, aba_catalogo, aba_admin = st.tabs(
 )
 
 # ======================
-# ABA: AGENDAMENTO (CONFIRMA VIA WHATSAPP ANTES DE SALVAR)
+# ABA: AGENDAMENTO
 # ======================
 with aba_agendar:
     st.subheader("Agende seu horário")
@@ -137,33 +143,38 @@ with aba_agendar:
     nome = st.text_input("Nome da cliente")
     data_atendimento = st.date_input("Data do atendimento", min_value=date.today())
 
+    # ===== (1) BLOQUEAR DOMINGO =====
+    # weekday(): 0=seg ... 6=dom
+    if data_atendimento.weekday() == 6:
+        st.error("Não atendemos aos domingos. Escolha outra data.")
+        st.stop()
+
     servico = st.selectbox(
         "Tipo de serviço",
         ["Alongamento em Gel", "Alongamento em Fibra de Vidro", "Pedicure", "Manutenção"]
     )
 
     horarios = ["07:00", "08:30", "10:00", "13:30", "15:00", "16:30", "18:00"]
+
     ocupados = horarios_ocupados(data_atendimento)
+
+    # ===== (4) BLOQUEAR DIA LOTADO =====
+    if len(ocupados) >= len(horarios):
+        st.warning("Esse dia está sem vagas. Escolha outra data.")
+        st.stop()
+
     disponiveis = [h for h in horarios if h not in ocupados]
 
     st.markdown("**Horários disponíveis**")
-    if disponiveis:
-        with st.container(height=180):
-            horario_escolhido = st.radio(
-                "Escolha um horário",
-                disponiveis,
-                label_visibility="collapsed"
-            )
-    else:
-        horario_escolhido = None
-        st.warning("Nenhum horário disponível")
+    with st.container(height=180):
+        horario_escolhido = st.radio("Escolha um horário", disponiveis, label_visibility="collapsed")
 
-    # Passo 0: criar pendente (não salva ainda)
+    # Criar pendente (não salva ainda)
     if st.button("Confirmar Agendamento 💅"):
         if not nome or not horario_escolhido:
             st.error("Preencha todos os campos")
         else:
-            # checa novamente se ainda está livre
+            # checa novamente
             if horario_escolhido in horarios_ocupados(data_atendimento):
                 st.error("Esse horário acabou de ser ocupado. Escolha outro.")
             else:
@@ -178,7 +189,7 @@ with aba_agendar:
                 )
                 st.success("Quase lá! Confirme no WhatsApp 👇")
 
-    # Passo 1 e 2
+    # Bloco WhatsApp + copiar
     if st.session_state.pendente and st.session_state.wa_link:
         st.divider()
         st.subheader("📲 Passo 1: Confirme no WhatsApp")
@@ -189,8 +200,12 @@ with aba_agendar:
 
         with c2:
             if st.button("📋 Copiar link"):
-                copiar_para_clipboard(st.session_state.wa_link)
-                st.toast("Link copiado ✅", icon="📋")
+                st.session_state.do_copy = True
+
+        if st.session_state.do_copy:
+            copiar_para_clipboard(st.session_state.wa_link)
+            st.toast("Link copiado ✅", icon="📋")
+            st.session_state.do_copy = False
 
         st.subheader("✅ Passo 2: Depois de enviar, finalize")
 
