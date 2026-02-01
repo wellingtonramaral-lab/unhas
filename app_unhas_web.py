@@ -116,14 +116,9 @@ def montar_mensagem(nome, data_atendimento: date, horario, servico):
     )
 
 def montar_links_whatsapp(mensagem: str):
-    # wa.me (web)
     text_encoded = urllib.parse.quote(mensagem, safe="")
     url_web = f"https://wa.me/{WHATSAPP_NUMERO}?text={text_encoded}"
-
-    # whatsapp:// (app direto – melhor no iPhone/Android)
-    # NOTE: alguns browsers pedem interação do usuário; por isso tentamos junto com o web fallback.
     url_scheme = f"whatsapp://send?phone={WHATSAPP_NUMERO}&text={text_encoded}"
-
     return url_web, url_scheme
 
 def copiar_para_clipboard(texto: str):
@@ -132,29 +127,10 @@ def copiar_para_clipboard(texto: str):
         height=0
     )
 
-def abrir_whatsapp_auto(url_scheme: str, url_web: str):
-    """
-    Tentativa forte:
-    1) tenta abrir o app direto via whatsapp://
-    2) se não abrir, cai no wa.me via navegador
-    """
-    components.html(
-        f"""
-        <script>
-          (function() {{
-            var scheme = {json.dumps(url_scheme)};
-            var web = {json.dumps(url_web)};
-            // tenta abrir o app
-            window.location.href = scheme;
-            // fallback para web
-            setTimeout(function() {{
-              window.location.href = web;
-            }}, 800);
-          }})();
-        </script>
-        """,
-        height=0
-    )
+def limpar_confirmacao():
+    st.session_state.wa_link = None
+    st.session_state.wa_scheme = None
+    st.rerun()
 
 # ======================
 # TABS
@@ -169,6 +145,62 @@ aba_agendar, aba_catalogo, aba_admin = st.tabs(
 with aba_agendar:
     st.subheader("Agende seu horário")
 
+    # ======================
+    # SE JÁ AGENDOU: MOSTRA CARD E ESCONDE FORM
+    # ======================
+    if st.session_state.wa_link:
+        st.success("Agendamento registrado ✅ Agora envie a confirmação no WhatsApp 👇")
+
+        st.markdown(
+            """
+            <div style="
+                border:1px solid #e6e6e6;
+                border-radius:14px;
+                padding:16px;
+                margin-top:10px;
+                background:#ffffff;
+            ">
+              <div style="font-size:18px;font-weight:700;margin-bottom:8px;">
+                📲 Enviar confirmação
+              </div>
+              <div style="color:#666;margin-bottom:12px;">
+                Toque no botão abaixo para abrir o WhatsApp com a mensagem pronta.
+              </div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+
+        c1, c2 = st.columns(2)
+
+        with c1:
+            st.link_button("📲 Abrir WhatsApp agora", st.session_state.wa_link)
+
+        with c2:
+            if st.button("📋 Copiar link"):
+                st.session_state.do_copy = True
+
+        if st.session_state.do_copy:
+            copiar_para_clipboard(st.session_state.wa_link)
+            st.toast("Link copiado ✅", icon="📋")
+            st.session_state.do_copy = False
+
+        st.caption("Se não abrir, copie o link e cole no navegador.")
+        st.markdown("**Tentar abrir direto no app (opcional):**", help="Pode funcionar dependendo do iPhone/navegador.")
+        st.markdown(
+            f'<a href="{st.session_state.wa_scheme}" style="text-decoration:none;">'
+            f'<button style="padding:10px 14px;border-radius:10px;border:1px solid #ccc;cursor:pointer;">'
+            f'📱 Abrir no app (tentativa)'
+            f'</button></a>',
+            unsafe_allow_html=True
+        )
+
+        st.button("🔁 Novo agendamento / Limpar confirmação", on_click=limpar_confirmacao)
+        st.stop()
+
+    # ======================
+    # FORM NORMAL (SÓ APARECE SE NÃO TIVER wa_link)
+    # ======================
     nome = st.text_input("Nome da cliente")
     data_atendimento = st.date_input("Data do atendimento", min_value=date.today())
 
@@ -201,10 +233,10 @@ with aba_agendar:
         )
 
     st.divider()
-    st.subheader("📲 Confirmar no WhatsApp")
+    st.subheader("📲 Confirmação")
 
-    # Botão único: salva e tenta abrir WhatsApp automaticamente
-    if st.button("📲 Confirmar no WhatsApp (salvar e abrir)"):
+    # Botão principal: agénda e mostra card do WhatsApp
+    if st.button("📲 Agendar e abrir WhatsApp"):
         if not nome or not horario_escolhido:
             st.error("Preencha todos os campos")
         else:
@@ -223,30 +255,8 @@ with aba_agendar:
                     st.session_state.wa_link = url_web
                     st.session_state.wa_scheme = url_scheme
 
-                    st.success("Agendamento registrado! Tentando abrir o WhatsApp...")
-                    # tenta abrir (app -> web fallback)
-                    abrir_whatsapp_auto(url_scheme, url_web)
-
-    # fallback: botões manuais sempre disponíveis se o auto não abrir
-    if st.session_state.wa_link:
-        c1, c2 = st.columns(2)
-
-        with c1:
-            st.link_button("📲 Abrir WhatsApp", st.session_state.wa_link)
-
-        with c2:
-            if st.button("📋 Copiar link"):
-                st.session_state.do_copy = True
-
-        if st.session_state.do_copy:
-            copiar_para_clipboard(st.session_state.wa_link)
-            st.toast("Link copiado ✅", icon="📋")
-            st.session_state.do_copy = False
-
-        if st.button("Limpar link"):
-            st.session_state.wa_link = None
-            st.session_state.wa_scheme = None
-            st.rerun()
+                    st.success("Agendamento registrado! ✅")
+                    st.rerun()
 
 # ======================
 # ABA: CATÁLOGO
