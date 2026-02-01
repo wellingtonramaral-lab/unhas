@@ -51,6 +51,9 @@ if "wa_link" not in st.session_state:
 if "do_copy" not in st.session_state:
     st.session_state.do_copy = False
 
+if "redirect_to" not in st.session_state:
+    st.session_state.redirect_to = None
+
 # ======================
 # FUNÇÕES SUPABASE
 # ======================
@@ -116,24 +119,24 @@ def montar_link_whatsapp(nome, data_atendimento: date, horario, servico):
 
 def copiar_para_clipboard(texto: str):
     components.html(
-        f"""
-        <script>
-          navigator.clipboard.writeText({json.dumps(texto)});
-        </script>
-        """,
+        f"<script>navigator.clipboard.writeText({json.dumps(texto)});</script>",
         height=0
     )
 
-def abrir_em_nova_aba(url: str):
-    # tenta abrir em nova aba/janela no clique (se popup blocker permitir)
+def redirecionar_mesma_aba(url: str):
+    # abre de verdade (menos bloqueios que window.open)
     components.html(
-        f"""
-        <script>
-          window.open({json.dumps(url)}, "_blank");
-        </script>
-        """,
+        f"<script>window.location.href = {json.dumps(url)};</script>",
         height=0
     )
+
+# ======================
+# REDIRECT (se tiver)
+# ======================
+if st.session_state.redirect_to:
+    url = st.session_state.redirect_to
+    st.session_state.redirect_to = None  # evita loop
+    redirecionar_mesma_aba(url)
 
 # ======================
 # TABS
@@ -182,7 +185,7 @@ with aba_agendar:
     st.divider()
     st.subheader("📲 Confirmar no WhatsApp")
 
-    # Botão único: salva e abre WhatsApp
+    # Botão único: salva e redireciona
     if st.button("📲 Confirmar no WhatsApp (salvar e abrir)"):
         if not nome or not horario_escolhido:
             st.error("Preencha todos os campos")
@@ -191,7 +194,6 @@ with aba_agendar:
             if horario_escolhido in horarios_ocupados(data_atendimento):
                 st.error("Esse horário acabou de ser ocupado. Escolha outro.")
             else:
-                # salva primeiro
                 resp = inserir_agendamento(nome.strip(), data_atendimento, horario_escolhido, servico)
                 if getattr(resp, "error", None):
                     st.error("Não foi possível salvar agora. Tente novamente.")
@@ -199,19 +201,16 @@ with aba_agendar:
                     st.session_state.wa_link = montar_link_whatsapp(
                         nome.strip(), data_atendimento, horario_escolhido, servico
                     )
-                    st.success("Agendamento confirmado e registrado! 💖 Abrindo WhatsApp...")
+                    # dispara redirect na próxima execução (mais confiável)
+                    st.session_state.redirect_to = st.session_state.wa_link
+                    st.success("Agendamento registrado! Abrindo WhatsApp...")
+                    st.rerun()
 
-                    # tenta abrir WhatsApp automaticamente
-                    abrir_em_nova_aba(st.session_state.wa_link)
-                    st.toast("Se não abrir, use Copiar link ✅", icon="📋")
-
-    # Se já tiver link, mostra botões limpos (abrir + copiar)
+    # fallback: botões limpos
     if st.session_state.wa_link:
         c1, c2 = st.columns(2)
-
         with c1:
             st.link_button("📲 Abrir WhatsApp", st.session_state.wa_link)
-
         with c2:
             if st.button("📋 Copiar link"):
                 st.session_state.do_copy = True
