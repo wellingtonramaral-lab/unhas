@@ -20,7 +20,9 @@ SUPABASE_KEY = st.secrets["SUPABASE_SERVICE_ROLE_KEY"]
 PIX_CHAVE = st.secrets.get("PIX_CHAVE", "")
 PIX_NOME = st.secrets.get("PIX_NOME", "Profissional")
 PIX_CIDADE = st.secrets.get("PIX_CIDADE", "BRASIL")
-TEMPO_EXPIRACAO_MIN = int(st.secrets.get("TEMPO_EXPIRACAO_MIN", 30))  # 0 desativa expiração
+
+# Se quiser expirar reserva pendente (ex: 30 min). Coloque 0 para NÃO expirar.
+TEMPO_EXPIRACAO_MIN = int(st.secrets.get("TEMPO_EXPIRACAO_MIN", 30))
 
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
@@ -31,44 +33,43 @@ st.set_page_config(page_title="Agendamento de Unhas 💅", layout="centered")
 st.title("💅 Agendamento de Unhas")
 
 # ======================
-# PREÇOS / SINAL
+# PREÇOS / SINAL FIXO
 # ======================
-PRECOS = {
-    "Alongamento em Gel": 180.0,
-    "Alongamento em Fibra de Vidro": 200.0,
-    "Pedicure": 60.0,
-    "Manutenção": 120.0,
-}
+VALOR_SINAL_FIXO = 20.0
 
-SINAL_PORCENTAGEM = 0.30  # 30% de sinal
+PRECOS = {
+    "Unha em Gel": 130.0,
+    "Manutenção – Gel": 100.0,
+
+    "Unha Fibra de Vidro": 150.0,
+    "Manutenção – Fibra": 110.0,
+
+    "Pedicure": 50.0,
+    "Manutenção – Pedicure": 50.0,
+
+    "Banho de Gel": 100.0,
+    "Manutenção – Banho de Gel": 100.0,
+}
 
 
 def fmt_brl(v: float) -> str:
-    # Formata sem depender de locale
-    s = f"{v:,.2f}"
+    s = f"{float(v):,.2f}"
     s = s.replace(",", "X").replace(".", ",").replace("X", ".")
     return f"R$ {s}"
 
 
-def calcular_sinal(servico: str) -> float:
-    total = float(PRECOS.get(servico, 0.0))
-    sinal = total * SINAL_PORCENTAGEM
-    # arredonda para 2 casas
-    return round(sinal + 1e-9, 2)
+def calcular_sinal(_servico: str) -> float:
+    return float(VALOR_SINAL_FIXO)
 
 
 # ======================
-# CATÁLOGO PDF → IMAGENS (FIX: FUNDO BRANCO)
+# CATÁLOGO PDF → IMAGENS (FIX FUNDO BRANCO)
 # ======================
 CATALOGO_PDF = "catalogo.pdf"
 
 
 @st.cache_data(show_spinner=False)
 def pdf_para_imagens_com_fundo_branco(caminho_pdf: str, zoom: float = 2.0):
-    """
-    Converte cada página do PDF em PNG.
-    FIX catálogo preto: renderiza com alpha e depois "cola" em fundo branco.
-    """
     doc = fitz.open(caminho_pdf)
     imagens = []
     mat = fitz.Matrix(zoom, zoom)
@@ -101,9 +102,6 @@ if "wa_link" not in st.session_state:
 if "ultimo_ag" not in st.session_state:
     st.session_state.ultimo_ag = None
 
-if "do_copy" not in st.session_state:
-    st.session_state.do_copy = False
-
 if "copy_text" not in st.session_state:
     st.session_state.copy_text = None
 
@@ -122,7 +120,6 @@ def parse_dt(dt_str: str) -> datetime | None:
     if not dt_str:
         return None
     try:
-        # supabase pode vir com Z
         dt_str = dt_str.replace("Z", "+00:00")
         return datetime.fromisoformat(dt_str)
     except Exception:
@@ -164,8 +161,6 @@ def listar_agendamentos():
     df["Data"] = df["Data"].astype(str)
     df["Horário"] = df["Horário"].astype(str)
     df["Status"] = df["Status"].astype(str)
-
-    # Valor pode vir None
     df["Valor"] = df["Valor"].apply(lambda x: float(x) if x is not None else 0.0)
 
     return df
@@ -203,10 +198,8 @@ def horarios_ocupados(data_escolhida: date):
                 ocupados.add(horario)
             else:
                 if created_at is None:
-                    # se não der pra parsear, por segurança bloqueia
                     ocupados.add(horario)
                 else:
-                    # se created_at veio sem tz, assume UTC
                     if created_at.tzinfo is None:
                         created_at = created_at.replace(tzinfo=timezone.utc)
                     if (now - created_at) <= timedelta(minutes=TEMPO_EXPIRACAO_MIN):
@@ -262,7 +255,6 @@ def montar_link_whatsapp(texto: str):
 def limpar_confirmacao():
     st.session_state.wa_link = None
     st.session_state.ultimo_ag = None
-    st.session_state.do_copy = False
     st.session_state.copy_text = None
     st.rerun()
 
@@ -288,21 +280,16 @@ with aba_agendar:
         st.error("Não atendemos aos domingos. Escolha outra data.")
         st.stop()
 
-    servico = st.selectbox(
-        "Tipo de serviço",
-        list(PRECOS.keys())
-    )
+    servico = st.selectbox("Tipo de serviço", list(PRECOS.keys()))
 
     total_servico = float(PRECOS.get(servico, 0.0))
     valor_sinal = calcular_sinal(servico)
 
-    # mini resumo de valores
     st.caption(f"Valor do serviço: **{fmt_brl(total_servico)}** • Sinal para reservar: **{fmt_brl(valor_sinal)}**")
 
     horarios = ["07:00", "08:30", "10:00", "13:30", "15:00", "16:30", "18:00"]
     ocupados = horarios_ocupados(data_atendimento)
 
-    # BLOQUEAR DIA LOTADO
     if len(ocupados) >= len(horarios):
         st.warning("Esse dia está sem vagas. Escolha outra data.")
         st.stop()
@@ -311,15 +298,10 @@ with aba_agendar:
 
     st.markdown("**Horários disponíveis**")
     with st.container(height=180):
-        horario_escolhido = st.radio(
-            "Escolha um horário",
-            disponiveis,
-            label_visibility="collapsed"
-        )
+        horario_escolhido = st.radio("Escolha um horário", disponiveis, label_visibility="collapsed")
 
     st.divider()
 
-    # ===== LINHA: RESERVAR + botões auxiliares =====
     left, r1, r2, r3 = st.columns([1.2, 1, 1, 0.9])
 
     with left:
@@ -345,13 +327,11 @@ with aba_agendar:
         else:
             st.write("")
 
-    # Botão extra para copiar Pix (abaixo, discreto)
-    if PIX_CHAVE and st.session_state.ultimo_ag:
+    if PIX_CHAVE and st.session_state.wa_link:
         if st.button("🔑 Copiar chave Pix", use_container_width=True):
             copiar_para_clipboard(PIX_CHAVE)
             st.toast("Chave Pix copiada ✅", icon="🔑")
 
-    # ===== AÇÃO DO RESERVAR =====
     if reservar_click:
         if not nome or not horario_escolhido:
             st.error("Preencha todos os campos.")
@@ -388,10 +368,9 @@ with aba_agendar:
                         "sinal": valor_sinal,
                         "status": "pendente"
                     }
-                    st.success("Reserva criada como **PENDENTE**. Agora envie a mensagem no WhatsApp e pague o sinal via Pix.")
+                    st.success("Reserva criada como **PENDENTE**. Envie a mensagem no WhatsApp e pague o sinal via Pix.")
                     st.rerun()
 
-    # ===== RESUMO DISCRETO (abaixo) =====
     if st.session_state.ultimo_ag:
         u = st.session_state.ultimo_ag
         st.caption(
@@ -460,7 +439,6 @@ with aba_admin:
         if df_admin.empty:
             st.info("Nenhum agendamento encontrado.")
         else:
-            # Mostra bonitinho
             df_show = df_admin.copy()
             df_show["Valor"] = df_show["Valor"].apply(lambda v: fmt_brl(float(v)))
             st.dataframe(df_show.drop(columns=["id"]), use_container_width=True)
