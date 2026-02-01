@@ -20,7 +20,7 @@ PIX_CHAVE = st.secrets.get("PIX_CHAVE", "")
 PIX_NOME = st.secrets.get("PIX_NOME", "Profissional")
 PIX_CIDADE = st.secrets.get("PIX_CIDADE", "BRASIL")
 
-# você confirmou que quer 60 minutos
+# você quer 60 minutos
 TEMPO_EXPIRACAO_MIN = int(st.secrets.get("TEMPO_EXPIRACAO_MIN", 60))
 
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
@@ -36,6 +36,7 @@ st.title("💅 Agendamento de Unhas")
 # ======================
 VALOR_SINAL_FIXO = 20.0
 
+# ✅ NOMES ATUALIZADOS + REMOVIDOS
 PRECOS = {
     "Alongamento em Gel": 130.0,
     "Manutenção – Gel": 100.0,
@@ -46,7 +47,6 @@ PRECOS = {
     "Pedicure": 50.0,
     "Banho de Gel": 100.0,
 }
-
 
 
 def fmt_brl(v: float) -> str:
@@ -60,7 +60,7 @@ def calcular_sinal(_servico: str) -> float:
 
 
 # ======================
-# HORÁRIOS POR DIA (NOVO)
+# HORÁRIOS POR DIA
 # ======================
 def horarios_do_dia(d: date) -> list[str]:
     wd = d.weekday()  # 0=seg ... 5=sab ... 6=dom
@@ -72,7 +72,7 @@ def horarios_do_dia(d: date) -> list[str]:
 
 
 # ======================
-# CATÁLOGO PDF → IMAGENS (FIX FUNDO BRANCO)
+# CATÁLOGO PDF → IMAGENS (FUNDO BRANCO)
 # ======================
 CATALOGO_PDF = "catalogo.pdf"
 
@@ -156,7 +156,7 @@ def listar_agendamentos():
     df = pd.DataFrame(dados)
 
     if df.empty:
-        return pd.DataFrame(columns=["id", "Cliente", "Data", "Horário", "Serviço", "Status", "Valor", "Criado em"])
+        return pd.DataFrame(columns=["id", "Cliente", "Data", "Horário", "Serviço", "Status", "Sinal", "Criado em"])
 
     df.rename(columns={
         "cliente": "Cliente",
@@ -164,22 +164,19 @@ def listar_agendamentos():
         "horario": "Horário",
         "servico": "Serviço",
         "status": "Status",
-        "valor": "Valor",
+        "valor": "Sinal",
         "created_at": "Criado em"
     }, inplace=True)
 
     df["Data"] = df["Data"].astype(str)
     df["Horário"] = df["Horário"].astype(str)
     df["Status"] = df["Status"].astype(str)
-    df["Valor"] = df["Valor"].apply(lambda x: float(x) if x is not None else 0.0)
+    df["Sinal"] = df["Sinal"].apply(lambda x: float(x) if x is not None else 0.0)
 
     return df
 
 
 def limpar_pendentes_expirados():
-    """
-    Remove do banco os 'pendente' vencidos (60 min) para NÃO travar o índice unique (data, horario).
-    """
     if TEMPO_EXPIRACAO_MIN <= 0:
         return
 
@@ -194,11 +191,6 @@ def limpar_pendentes_expirados():
 
 
 def horarios_ocupados(data_escolhida: date):
-    """
-    Considera ocupado:
-    - status = 'pago'
-    - status = 'pendente' e ainda não expirou (60 min)
-    """
     resp = (
         supabase
         .table("agendamentos")
@@ -236,10 +228,6 @@ def horarios_ocupados(data_escolhida: date):
 
 
 def cliente_ja_agendou_no_dia(cliente: str, data_escolhida: date) -> bool:
-    """
-    Trava no APP: mesmo cliente não agenda 2x no mesmo dia.
-    (Recomendado também ter índice no banco: data + cliente_norm)
-    """
     try:
         resp = (
             supabase
@@ -272,12 +260,10 @@ def inserir_pre_agendamento(cliente, data_escolhida: date, horario, servico, val
     except APIError as e:
         msg = str(e).lower()
 
-        # duplicidade de cliente no dia (se você criou o índice agendamento_cliente_dia)
         if "agendamento_cliente_dia" in msg or "cliente_norm" in msg:
             st.warning("Você já fez um agendamento para esse dia. Se quiser mudar, fale com a profissional.")
             return None
 
-        # duplicidade de horário (data+horario)
         if "agendamento_unico" in msg or "duplicate key" in msg or "23505" in msg:
             st.warning("Esse horário já foi reservado. Escolha outro.")
             return None
@@ -345,10 +331,8 @@ with aba_agendar:
     valor_sinal = calcular_sinal(servico)
     st.caption(f"Valor do serviço: **{fmt_brl(total_servico)}** • Sinal para reservar: **{fmt_brl(valor_sinal)}**")
 
-    # ===== HORÁRIOS NOVOS =====
     horarios = horarios_do_dia(data_atendimento)
 
-    # se for domingo (ou não tiver horário), não consulta e não quebra outras abas
     if eh_domingo or not horarios:
         ocupados = set()
         disponiveis = []
@@ -362,7 +346,7 @@ with aba_agendar:
     st.markdown("**Horários disponíveis**")
 
     if disponiveis:
-        with st.container(height=140):
+        with st.container(height=120):
             horario_escolhido = st.radio("Escolha um horário", disponiveis, label_visibility="collapsed")
     else:
         horario_escolhido = None
@@ -388,12 +372,10 @@ with aba_agendar:
         if st.session_state.wa_link:
             st.link_button("📲 Abrir WhatsApp", st.session_state.wa_link, use_container_width=True)
 
-    # (opcional) Pix
     if PIX_CHAVE and st.session_state.wa_link:
         if st.button("🔑 Ver chave Pix", use_container_width=True):
             st.toast(f"Chave Pix: {PIX_CHAVE}", icon="🔑")
 
-    # ===== AÇÃO DO RESERVAR =====
     if reservar_click:
         if not nome or not horario_escolhido:
             st.error("Preencha todos os campos.")
@@ -495,70 +477,116 @@ with aba_admin:
 
         st.subheader("📋 Agendamentos / Reservas")
 
-        colf1, colf2 = st.columns([1, 1])
-        with colf1:
-            filtrar_data = st.checkbox("Filtrar por data")
-        with colf2:
-            filtrar_status = st.checkbox("Filtrar por status")
-
-        if filtrar_data:
-            data_filtro = st.date_input("Escolha a data", value=date.today(), key="filtro_admin")
-            df_admin = df_admin[df_admin["Data"] == str(data_filtro)]
-
-        if filtrar_status:
-            status_sel = st.selectbox("Status", ["pendente", "pago"])
-            df_admin = df_admin[df_admin["Status"].str.lower() == status_sel]
-
         if df_admin.empty:
             st.info("Nenhum agendamento encontrado.")
         else:
-            df_show = df_admin.copy()
-            df_show["Valor"] = df_show["Valor"].apply(lambda v: fmt_brl(float(v)))
+            # ===== ENRIQUECE COM PREÇO DO SERVIÇO =====
+            df_admin["Data_dt"] = pd.to_datetime(df_admin["Data"], errors="coerce")
+            df_admin["Preço do serviço"] = df_admin["Serviço"].map(PRECOS).fillna(0.0).astype(float)
+
+            # ===== FILTRO DE PERÍODO (TUDO / MÊS / ANO) =====
+            colp1, colp2, colp3 = st.columns([1, 1, 1])
+            with colp1:
+                periodo = st.selectbox("Período", ["Tudo", "Mês", "Ano"], index=0)
+
+            anos_disponiveis = sorted(
+                [int(y) for y in df_admin["Data_dt"].dropna().dt.year.unique().tolist()]
+            )
+            ano_padrao = anos_disponiveis[-1] if anos_disponiveis else date.today().year
+
+            with colp2:
+                ano_sel = st.selectbox("Ano", anos_disponiveis if anos_disponiveis else [ano_padrao],
+                                       index=(len(anos_disponiveis)-1) if anos_disponiveis else 0)
+
+            with colp3:
+                mes_sel = st.selectbox("Mês", list(range(1, 13)), index=date.today().month - 1)
+
+            df_filtrado = df_admin.copy()
+
+            if periodo == "Mês":
+                df_filtrado = df_filtrado[
+                    (df_filtrado["Data_dt"].dt.year == int(ano_sel)) &
+                    (df_filtrado["Data_dt"].dt.month == int(mes_sel))
+                ]
+            elif periodo == "Ano":
+                df_filtrado = df_filtrado[df_filtrado["Data_dt"].dt.year == int(ano_sel)]
+
+            # ===== FILTRO DE STATUS (opcional) =====
+            filtrar_status = st.checkbox("Filtrar por status")
+            if filtrar_status:
+                status_sel = st.selectbox("Status", ["pendente", "pago"])
+                df_filtrado = df_filtrado[df_filtrado["Status"].str.lower() == status_sel]
+
+            # ===== TOTAIS DO PERÍODO =====
+            total_servicos = float(df_filtrado["Preço do serviço"].sum()) if not df_filtrado.empty else 0.0
+            total_sinais = float(df_filtrado["Sinal"].sum()) if not df_filtrado.empty else 0.0
+            qtd = int(len(df_filtrado))
+
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Quantidade", f"{qtd}")
+            c2.metric("Total serviços", fmt_brl(total_servicos))
+            c3.metric("Total sinais", fmt_brl(total_sinais))
+
+            # ===== TABELA =====
+            df_show = df_filtrado.drop(columns=["Data_dt"]).copy()
+            df_show["Preço do serviço"] = df_show["Preço do serviço"].apply(lambda v: fmt_brl(float(v)))
+            df_show["Sinal"] = df_show["Sinal"].apply(lambda v: fmt_brl(float(v)))
+
             st.dataframe(df_show.drop(columns=["id"]), use_container_width=True)
 
+            st.divider()
+
+            # ===== AÇÕES =====
             st.subheader("✅ Marcar como PAGO")
-            op_pagar = df_admin.apply(
+            op_pagar = df_filtrado.apply(
                 lambda r: f'#{r["id"]} | {r["Cliente"]} | {r["Data"]} | {r["Horário"]} | {r["Serviço"]} | {r["Status"]}',
                 axis=1
             ).tolist()
 
-            escolha_pagar = st.selectbox("Selecione uma reserva/agendamento", op_pagar, key="sel_pagar")
-            if st.button("Marcar como PAGO ✅"):
-                ag_id = int(escolha_pagar.split("|")[0].replace("#", "").strip())
-                marcar_como_pago(ag_id)
-                st.success("Marcado como PAGO ✅")
-                st.rerun()
+            if op_pagar:
+                escolha_pagar = st.selectbox("Selecione uma reserva/agendamento", op_pagar, key="sel_pagar")
+                if st.button("Marcar como PAGO ✅"):
+                    ag_id = int(escolha_pagar.split("|")[0].replace("#", "").strip())
+                    marcar_como_pago(ag_id)
+                    st.success("Marcado como PAGO ✅")
+                    st.rerun()
+            else:
+                st.info("Nada para marcar como pago no filtro atual.")
 
             st.subheader("🗑️ Excluir")
-            op_excluir = df_admin.apply(
+            op_excluir = df_filtrado.apply(
                 lambda r: f'#{r["id"]} | {r["Cliente"]} | {r["Data"]} | {r["Horário"]} | {r["Serviço"]} | {r["Status"]}',
                 axis=1
             ).tolist()
 
-            escolha_exc = st.selectbox("Selecione", op_excluir, key="sel_exc")
-            if st.button("Excluir ❌"):
-                ag_id = int(escolha_exc.split("|")[0].replace("#", "").strip())
-                excluir_agendamento(ag_id)
-                st.success("Excluído ✅")
-                st.rerun()
+            if op_excluir:
+                escolha_exc = st.selectbox("Selecione", op_excluir, key="sel_exc")
+                if st.button("Excluir ❌"):
+                    ag_id = int(escolha_exc.split("|")[0].replace("#", "").strip())
+                    excluir_agendamento(ag_id)
+                    st.success("Excluído ✅")
+                    st.rerun()
+            else:
+                st.info("Nada para excluir no filtro atual.")
 
-        st.subheader("⬇️ Baixar CSV")
-        if not df_admin.empty:
-            df_csv = df_admin.copy()
-            df_csv["Valor"] = df_csv["Valor"].apply(lambda v: fmt_brl(float(v)))
-            st.download_button(
-                "Baixar agendamentos.csv",
-                df_csv.drop(columns=["id"]).to_csv(index=False).encode("utf-8"),
-                file_name="agendamentos.csv",
-                mime="text/csv"
-            )
-        else:
-            st.download_button(
-                "Baixar agendamentos.csv",
-                pd.DataFrame().to_csv(index=False).encode("utf-8"),
-                file_name="agendamentos.csv",
-                mime="text/csv"
-            )
+            st.subheader("⬇️ Baixar CSV (filtrado)")
+            if not df_filtrado.empty:
+                df_csv = df_filtrado.drop(columns=["Data_dt"]).copy()
+                df_csv["Preço do serviço"] = df_csv["Preço do serviço"].apply(lambda v: fmt_brl(float(v)))
+                df_csv["Sinal"] = df_csv["Sinal"].apply(lambda v: fmt_brl(float(v)))
+                st.download_button(
+                    "Baixar agendamentos_filtrado.csv",
+                    df_csv.drop(columns=["id"]).to_csv(index=False).encode("utf-8"),
+                    file_name="agendamentos_filtrado.csv",
+                    mime="text/csv"
+                )
+            else:
+                st.download_button(
+                    "Baixar agendamentos_filtrado.csv",
+                    pd.DataFrame().to_csv(index=False).encode("utf-8"),
+                    file_name="agendamentos_filtrado.csv",
+                    mime="text/csv"
+                )
 
     else:
         with st.form("login_admin"):
