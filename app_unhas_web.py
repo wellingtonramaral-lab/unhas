@@ -43,9 +43,9 @@ def pdf_para_imagens(caminho_pdf: str, zoom: float = 2.0):
 if "admin_logado" not in st.session_state:
     st.session_state.admin_logado = False
 
-# controle do fluxo "pendente -> whatsapp -> salvar"
 if "pendente" not in st.session_state:
-    st.session_state.pendente = None  # dict com dados do agendamento pendente
+    st.session_state.pendente = None
+
 if "wa_link" not in st.session_state:
     st.session_state.wa_link = None
 
@@ -78,6 +78,7 @@ def listar_agendamentos():
     df["Horário"] = df["Horário"].astype(str)
     return df
 
+
 def horarios_ocupados(data_escolhida: date):
     resp = (
         supabase
@@ -88,6 +89,7 @@ def horarios_ocupados(data_escolhida: date):
     )
     return set([r["horario"] for r in (resp.data or [])])
 
+
 def inserir_agendamento(cliente, data_escolhida: date, horario, servico):
     payload = {
         "cliente": cliente,
@@ -97,8 +99,10 @@ def inserir_agendamento(cliente, data_escolhida: date, horario, servico):
     }
     return supabase.table("agendamentos").insert(payload).execute()
 
+
 def excluir_agendamento(ag_id: int):
     return supabase.table("agendamentos").delete().eq("id", ag_id).execute()
+
 
 def montar_link_whatsapp(nome, data_atendimento: date, horario, servico):
     mensagem = (
@@ -109,16 +113,21 @@ def montar_link_whatsapp(nome, data_atendimento: date, horario, servico):
         f"💅 Serviço: {servico}\n\n"
         "✅ Estou enviando esta mensagem para confirmar."
     )
-    mensagem_url = urllib.parse.quote(mensagem, safe="")
-    return f"https://api.whatsapp.com/send?phone={WHATSAPP_NUMERO}&text={mensagem_url}"
+    return (
+        "https://api.whatsapp.com/send"
+        f"?phone={WHATSAPP_NUMERO}"
+        f"&text={urllib.parse.quote(mensagem, safe='')}"
+    )
 
 # ======================
 # TABS
 # ======================
-aba_agendar, aba_catalogo, aba_admin = st.tabs(["💅 Agendamento", "📒 Catálogo", "🔐 Admin"])
+aba_agendar, aba_catalogo, aba_admin = st.tabs(
+    ["💅 Agendamento", "📒 Catálogo", "🔐 Admin"]
+)
 
 # ======================
-# ABA: AGENDAMENTO (CONFIRMA VIA WHATSAPP ANTES DE SALVAR)
+# ABA: AGENDAMENTO
 # ======================
 with aba_agendar:
     st.subheader("Agende seu horário")
@@ -128,7 +137,12 @@ with aba_agendar:
 
     servico = st.selectbox(
         "Tipo de serviço",
-        ["Alongamento em Gel", "Alongamento em Fibra de Vidro", "Pedicure", "Manutenção"]
+        [
+            "Alongamento em Gel",
+            "Alongamento em Fibra de Vidro",
+            "Pedicure",
+            "Manutenção"
+        ]
     )
 
     horarios = ["07:00", "08:30", "10:00", "13:30", "15:00", "16:30", "18:00"]
@@ -136,21 +150,24 @@ with aba_agendar:
     disponiveis = [h for h in horarios if h not in ocupados]
 
     st.markdown("**Horários disponíveis**")
+
     if disponiveis:
         with st.container(height=180):
-            horario_escolhido = st.radio("Escolha um horário", disponiveis, label_visibility="collapsed")
+            horario_escolhido = st.radio(
+                "Escolha um horário",
+                disponiveis,
+                label_visibility="collapsed"
+            )
     else:
         horario_escolhido = None
         st.warning("Nenhum horário disponível")
 
-    # 1) Criar PENDENTE e gerar WhatsApp (não salva ainda)
+    # Passo 0: criar pendente
     if st.button("Confirmar Agendamento 💅"):
         if not nome or not horario_escolhido:
             st.error("Preencha todos os campos")
         else:
-            # Checa de novo se ainda está livre (anti corrida)
-            ocupados2 = horarios_ocupados(data_atendimento)
-            if horario_escolhido in ocupados2:
+            if horario_escolhido in horarios_ocupados(data_atendimento):
                 st.error("Esse horário acabou de ser ocupado. Escolha outro.")
             else:
                 st.session_state.pendente = {
@@ -160,79 +177,68 @@ with aba_agendar:
                     "servico": servico
                 }
                 st.session_state.wa_link = montar_link_whatsapp(
-                    nome.strip(), data_atendimento, horario_escolhido, servico
+                    nome.strip(),
+                    data_atendimento,
+                    horario_escolhido,
+                    servico
                 )
-                st.success("Quase lá! Agora confirme no WhatsApp 👇")
+                st.success("Quase lá! Confirme no WhatsApp 👇")
 
-    # 2) Bloco fixo: WhatsApp + botão final para salvar
+    # Passo 1 e 2: WhatsApp + finalizar
     if st.session_state.pendente and st.session_state.wa_link:
         st.divider()
-        st.subheader("📲 Passo 1: Envie a confirmação no WhatsApp")
+        st.subheader("📲 Passo 1: Confirme no WhatsApp")
 
         st.markdown(
-    f"""
-    <div style="
-        display:flex;
-        gap:12px;
-        flex-wrap:wrap;
-        margin-top:10px;
-    ">
-        <a href="{st.session_state.wa_link}" target="_blank"
-           style="text-decoration:none;">
-            <button style="
-                background-color:#25D366;
-                color:white;
-                padding:12px 18px;
-                border:none;
-                border-radius:8px;
-                font-size:16px;
-                cursor:pointer;
-            ">
-                📲 Abrir WhatsApp
-            </button>
-        </a>
+            f"""
+            <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:10px;">
+                <a href="{st.session_state.wa_link}" target="_blank">
+                    <button style="
+                        background:#25D366;
+                        color:white;
+                        padding:12px 18px;
+                        border:none;
+                        border-radius:8px;
+                        font-size:16px;
+                        cursor:pointer;
+                    ">📲 Abrir WhatsApp</button>
+                </a>
 
-        <button onclick="navigator.clipboard.writeText('{st.session_state.wa_link}')"
-            style="
-                background-color:#f0f0f0;
-                color:#333;
-                padding:12px 18px;
-                border:1px solid #ccc;
-                border-radius:8px;
-                font-size:16px;
-                cursor:pointer;
-            ">
-            📋 Copiar link
-        </button>
-    </div>
-    """,
-    unsafe_allow_html=True
-)
+                <button onclick="navigator.clipboard.writeText('{st.session_state.wa_link}')"
+                    style="
+                        background:#f0f0f0;
+                        color:#333;
+                        padding:12px 18px;
+                        border:1px solid #ccc;
+                        border-radius:8px;
+                        font-size:16px;
+                        cursor:pointer;
+                    ">📋 Copiar link</button>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
 
-st.caption("Se o WhatsApp não abrir automaticamente, use o botão **Copiar link**.")
+        st.subheader("✅ Passo 2: Depois de enviar, finalize")
 
-
-        st.subheader("✅ Passo 2: Depois de enviar no WhatsApp, clique abaixo para finalizar")
         col1, col2 = st.columns(2)
 
         with col1:
             if st.button("✅ Já enviei no WhatsApp — Finalizar"):
                 p = st.session_state.pendente
-
-                # Checa de novo disponibilidade antes de salvar
-                ocupados3 = horarios_ocupados(p["data"])
-                if p["horario"] in ocupados3:
-                    st.error("Ops! Esse horário foi ocupado antes da finalização. Escolha outro horário.")
+                if p["horario"] in horarios_ocupados(p["data"]):
+                    st.error("Esse horário foi ocupado antes da finalização.")
                 else:
-                    resp = inserir_agendamento(p["cliente"], p["data"], p["horario"], p["servico"])
-                    if getattr(resp, "error", None):
-                        st.error("Não consegui salvar agora. Tente novamente.")
-                    else:
-                        st.success("Agendamento FINALIZADO e registrado! 💖")
-                        # limpa estado
-                        st.session_state.pendente = None
-                        st.session_state.wa_link = None
-                        st.rerun()
+                    inserir_agendamento(
+                        p["cliente"],
+                        p["data"],
+                        p["horario"],
+                        p["servico"]
+                    )
+                    st.success("Agendamento FINALIZADO com sucesso! 💖")
+                    st.session_state.pendente = None
+                    st.session_state.wa_link = None
+                    st.rerun()
 
         with col2:
             if st.button("❌ Cancelar"):
@@ -247,26 +253,20 @@ st.caption("Se o WhatsApp não abrir automaticamente, use o botão **Copiar link
 with aba_catalogo:
     st.subheader("📒 Catálogo de Serviços")
 
-    try:
-        with open(CATALOGO_PDF, "rb") as f:
-            st.download_button(
-                "⬇️ Baixar catálogo (PDF)",
-                data=f,
-                file_name="catalogo.pdf",
-                mime="application/pdf"
-            )
-    except FileNotFoundError:
-        st.error("Arquivo 'catalogo.pdf' não encontrado no repositório.")
-        st.stop()
-
-    st.caption("Visualize o catálogo abaixo:")
+    with open(CATALOGO_PDF, "rb") as f:
+        st.download_button(
+            "⬇️ Baixar catálogo (PDF)",
+            data=f,
+            file_name="catalogo.pdf",
+            mime="application/pdf"
+        )
 
     with st.spinner("Carregando catálogo..."):
-        paginas_png = pdf_para_imagens(CATALOGO_PDF, zoom=2.0)
+        paginas = pdf_para_imagens(CATALOGO_PDF)
 
-    for i, img_bytes in enumerate(paginas_png, start=1):
+    for i, img in enumerate(paginas, start=1):
         st.markdown(f"**Página {i}**")
-        st.image(img_bytes, use_container_width=True)
+        st.image(img, use_container_width=True)
 
 # ======================
 # ABA: ADMIN
@@ -274,48 +274,13 @@ with aba_catalogo:
 with aba_admin:
     st.subheader("Área administrativa 🔐")
 
-    def sair_admin():
-        st.session_state.admin_logado = False
-        st.rerun()
-
     if st.session_state.admin_logado:
-        st.success("Acesso liberado ✅")
         if st.button("Sair"):
-            sair_admin()
+            st.session_state.admin_logado = False
+            st.rerun()
 
-        df_admin = listar_agendamentos()
-        st.subheader("📋 Agendamentos")
-
-        filtrar = st.checkbox("Filtrar por data")
-        if filtrar:
-            data_filtro = st.date_input("Escolha a data", value=date.today(), key="filtro")
-            df_admin = df_admin[df_admin["Data"] == str(data_filtro)]
-
-        if df_admin.empty:
-            st.info("Nenhum agendamento encontrado.")
-        else:
-            st.dataframe(df_admin.drop(columns=["id"]), use_container_width=True)
-
-            st.subheader("🗑️ Excluir agendamento")
-            opcoes = df_admin.apply(
-                lambda r: f'#{r["id"]} | {r["Cliente"]} | {r["Data"]} | {r["Horário"]} | {r["Serviço"]}',
-                axis=1
-            ).tolist()
-
-            escolha = st.selectbox("Selecione", opcoes)
-            if st.button("Excluir ❌"):
-                ag_id = int(escolha.split("|")[0].replace("#", "").strip())
-                excluir_agendamento(ag_id)
-                st.success("Agendamento excluído")
-                st.rerun()
-
-        st.subheader("⬇️ Baixar CSV")
-        st.download_button(
-            "Baixar agendamentos.csv",
-            df_admin.drop(columns=["id"]).to_csv(index=False).encode("utf-8"),
-            file_name="agendamentos.csv",
-            mime="text/csv"
-        )
+        df = listar_agendamentos()
+        st.dataframe(df.drop(columns=["id"]), use_container_width=True)
 
     else:
         with st.form("login_admin"):
