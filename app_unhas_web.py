@@ -11,7 +11,7 @@ import streamlit.components.v1 as components
 # SECRETS
 # ======================
 SENHA_ADMIN = st.secrets["SENHA_ADMIN"]
-WHATSAPP_NUMERO = st.secrets["WHATSAPP_NUMERO"]  # só números
+WHATSAPP_NUMERO = st.secrets["WHATSAPP_NUMERO"]  # só números, ex: 5548999999999
 SUPABASE_URL = st.secrets["SUPABASE_URL"]
 SUPABASE_KEY = st.secrets["SUPABASE_SERVICE_ROLE_KEY"]
 
@@ -48,11 +48,11 @@ if "admin_logado" not in st.session_state:
 if "wa_link" not in st.session_state:
     st.session_state.wa_link = None
 
+if "wa_scheme" not in st.session_state:
+    st.session_state.wa_scheme = None
+
 if "do_copy" not in st.session_state:
     st.session_state.do_copy = False
-
-if "redirect_to" not in st.session_state:
-    st.session_state.redirect_to = None
 
 # ======================
 # FUNÇÕES SUPABASE
@@ -105,8 +105,8 @@ def inserir_agendamento(cliente, data_escolhida: date, horario, servico):
 def excluir_agendamento(ag_id: int):
     return supabase.table("agendamentos").delete().eq("id", ag_id).execute()
 
-def montar_link_whatsapp(nome, data_atendimento: date, horario, servico):
-    mensagem = (
+def montar_mensagem(nome, data_atendimento: date, horario, servico):
+    return (
         "Olá! Barbára Vitória, quero CONFIRMAR meu agendamento:\n\n"
         f"👩 Cliente: {nome}\n"
         f"📅 Data: {data_atendimento.strftime('%d/%m/%Y')}\n"
@@ -114,8 +114,17 @@ def montar_link_whatsapp(nome, data_atendimento: date, horario, servico):
         f"💅 Serviço: {servico}\n\n"
         "✅ Estou enviando esta mensagem para confirmar."
     )
-    mensagem_url = urllib.parse.quote(mensagem, safe="")
-    return f"https://api.whatsapp.com/send?phone={WHATSAPP_NUMERO}&text={mensagem_url}"
+
+def montar_links_whatsapp(mensagem: str):
+    # wa.me (web)
+    text_encoded = urllib.parse.quote(mensagem, safe="")
+    url_web = f"https://wa.me/{WHATSAPP_NUMERO}?text={text_encoded}"
+
+    # whatsapp:// (app direto – melhor no iPhone/Android)
+    # NOTE: alguns browsers pedem interação do usuário; por isso tentamos junto com o web fallback.
+    url_scheme = f"whatsapp://send?phone={WHATSAPP_NUMERO}&text={text_encoded}"
+
+    return url_web, url_scheme
 
 def copiar_para_clipboard(texto: str):
     components.html(
@@ -123,20 +132,29 @@ def copiar_para_clipboard(texto: str):
         height=0
     )
 
-def redirecionar_mesma_aba(url: str):
-    # abre de verdade (menos bloqueios que window.open)
+def abrir_whatsapp_auto(url_scheme: str, url_web: str):
+    """
+    Tentativa forte:
+    1) tenta abrir o app direto via whatsapp://
+    2) se não abrir, cai no wa.me via navegador
+    """
     components.html(
-        f"<script>window.location.href = {json.dumps(url)};</script>",
+        f"""
+        <script>
+          (function() {{
+            var scheme = {json.dumps(url_scheme)};
+            var web = {json.dumps(url_web)};
+            // tenta abrir o app
+            window.location.href = scheme;
+            // fallback para web
+            setTimeout(function() {{
+              window.location.href = web;
+            }}, 800);
+          }})();
+        </script>
+        """,
         height=0
     )
-
-# ======================
-# REDIRECT (se tiver)
-# ======================
-if st.session_state.redirect_to:
-    url = st.session_state.redirect_to
-    st.session_state.redirect_to = None  # evita loop
-    redirecionar_mesma_aba(url)
 
 # ======================
 # TABS
@@ -185,32 +203,37 @@ with aba_agendar:
     st.divider()
     st.subheader("📲 Confirmar no WhatsApp")
 
-    # Botão único: salva e redireciona
+    # Botão único: salva e tenta abrir WhatsApp automaticamente
     if st.button("📲 Confirmar no WhatsApp (salvar e abrir)"):
         if not nome or not horario_escolhido:
             st.error("Preencha todos os campos")
         else:
-            # checa novamente para evitar corrida
+            # checa novamente (anti corrida)
             if horario_escolhido in horarios_ocupados(data_atendimento):
                 st.error("Esse horário acabou de ser ocupado. Escolha outro.")
             else:
                 resp = inserir_agendamento(nome.strip(), data_atendimento, horario_escolhido, servico)
+
                 if getattr(resp, "error", None):
                     st.error("Não foi possível salvar agora. Tente novamente.")
                 else:
-                    st.session_state.wa_link = montar_link_whatsapp(
-                        nome.strip(), data_atendimento, horario_escolhido, servico
-                    )
-                    # dispara redirect na próxima execução (mais confiável)
-                    st.session_state.redirect_to = st.session_state.wa_link
-                    st.success("Agendamento registrado! Abrindo WhatsApp...")
-                    st.rerun()
+                    msg = montar_mensagem(nome.strip(), data_atendimento, horario_escolhido, servico)
+                    url_web, url_scheme = montar_links_whatsapp(msg)
 
-    # fallback: botões limpos
+                    st.session_state.wa_link = url_web
+                    st.session_state.wa_scheme = url_scheme
+
+                    st.success("Agendamento registrado! Tentando abrir o WhatsApp...")
+                    # tenta abrir (app -> web fallback)
+                    abrir_whatsapp_auto(url_scheme, url_web)
+
+    # fallback: botões manuais sempre disponíveis se o auto não abrir
     if st.session_state.wa_link:
         c1, c2 = st.columns(2)
+
         with c1:
             st.link_button("📲 Abrir WhatsApp", st.session_state.wa_link)
+
         with c2:
             if st.button("📋 Copiar link"):
                 st.session_state.do_copy = True
@@ -222,6 +245,7 @@ with aba_agendar:
 
         if st.button("Limpar link"):
             st.session_state.wa_link = None
+            st.session_state.wa_scheme = None
             st.rerun()
 
 # ======================
