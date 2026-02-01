@@ -3,17 +3,39 @@ import pandas as pd
 from datetime import date
 import urllib.parse
 from supabase import create_client
+from supabase_auth.errors import AuthApiError
 import fitz  # PyMuPDF
 
-# ======================
-# SECRETS
-# ======================
-SENHA_ADMIN = st.secrets["SENHA_ADMIN"]
-WHATSAPP_NUMERO = st.secrets["WHATSAPP_NUMERO"]  # só números
-SUPABASE_URL = st.secrets["SUPABASE_URL"]
-SUPABASE_KEY = st.secrets["SUPABASE_SERVICE_ROLE_KEY"]
+# =========================================================
+# SECRETS (Streamlit Cloud → Settings → Secrets)
+# =========================================================
+# Obrigatórios:
+# SUPABASE_URL="https://xxxx.supabase.co"
+# SUPABASE_SERVICE_ROLE_KEY="...."
+# SUPABASE_ANON_KEY="...."               <- ANON PUBLIC KEY (para Auth OTP)
+# SENHA_ADMIN="Maite04!"
+# WHATSAPP_NUMERO="5548XXXXXXXXX"
+#
+# Arquivo no repo:
+# catalogo.pdf (na mesma pasta do app.py)
+#
+# Requisitos (requirements.txt):
+# streamlit
+# pandas
+# supabase
+# pymupdf
+# =========================================================
 
-supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+SENHA_ADMIN = st.secrets["SENHA_ADMIN"]
+WHATSAPP_NUMERO = st.secrets["WHATSAPP_NUMERO"]  # só números: 55 + DDD + número
+SUPABASE_URL = st.secrets["SUPABASE_URL"]
+SUPABASE_SERVICE_ROLE_KEY = st.secrets["SUPABASE_SERVICE_ROLE_KEY"]
+SUPABASE_ANON_KEY = st.secrets["SUPABASE_ANON_KEY"]
+
+# Cliente DB (server) - acesso ao banco
+supabase_db = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+# Cliente Auth (OTP por SMS) - usa ANON KEY
+supabase_auth = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
 
 # ======================
 # CONFIG STREAMLIT
@@ -46,12 +68,52 @@ if "wa_link" not in st.session_state:
 if "admin_logado" not in st.session_state:
     st.session_state.admin_logado = False
 
+# Gate SMS (OTP)
+if "cliente_verificada" not in st.session_state:
+    st.session_state.cliente_verificada = False
+if "cliente_phone" not in st.session_state:
+    st.session_state.cliente_phone = None
+if "cliente_nome" not in st.session_state:
+    st.session_state.cliente_nome = None
+if "otp_enviado" not in st.session_state:
+    st.session_state.otp_enviado = False
+
 # ======================
-# FUNÇÕES SUPABASE
+# HELPERS SMS/OTP
+# ======================
+def normalizar_phone_br(phone: str) -> str:
+    """
+    Aceita: 48999999999, (48) 99999-9999, 5548999999999, +5548999999999
+    Retorna em E.164: +55DDDNUMERO
+    """
+    digits = "".join([c for c in phone if c.isdigit()])
+    if digits.startswith("55"):
+        return "+" + digits
+    return "+55" + digits
+
+def send_otp(phone_e164: str):
+    # Envia OTP por SMS (depende de Phone Provider configurado no Supabase)
+    return supabase_auth.auth.sign_in_with_otp({"phone": phone_e164})
+
+def verify_otp(phone_e164: str, code: str):
+    # Verifica OTP
+    return supabase_auth.auth.verify_otp({"phone": phone_e164, "token": code, "type": "sms"})
+
+def garantir_tabela_clientes():
+    """
+    Garante (tentando) que a tabela clientes exista.
+    Se você já criou no SQL Editor, ótimo.
+    Se não existir, esse select vai falhar. Aí crie manualmente no Supabase com:
+      create table public.clientes (phone text primary key, nome text not null, criado_em timestamptz default now());
+    """
+    pass  # só um lembrete; criação de tabela é no Supabase (SQL Editor)
+
+# ======================
+# FUNÇÕES SUPABASE (DB)
 # ======================
 def listar_agendamentos():
     resp = (
-        supabase
+        supabase_db
         .table("agendamentos")
         .select("id,cliente,data,horario,servico")
         .order("data")
@@ -77,7 +139,7 @@ def listar_agendamentos():
 
 def horarios_ocupados(data_escolhida: date):
     resp = (
-        supabase
+        supabase_db
         .table("agendamentos")
         .select("horario")
         .eq("data", data_escolhida.isoformat())
@@ -92,10 +154,10 @@ def inserir_agendamento(cliente, data_escolhida: date, horario, servico):
         "horario": horario,
         "servico": servico
     }
-    return supabase.table("agendamentos").insert(payload).execute()
+    return supabase_db.table("agendamentos").insert(payload).execute()
 
 def excluir_agendamento(ag_id: int):
-    return supabase.table("agendamentos").delete().eq("id", ag_id).execute()
+    return supabase_db.table("agendamentos").delete().eq("id", ag_id).execute()
 
 def montar_link_whatsapp(nome, data_atendimento: date, horario, servico):
     mensagem = (
@@ -116,147 +178,39 @@ aba_agendar, aba_catalogo, aba_admin = st.tabs(
 )
 
 # ======================
-# ABA: AGENDAMENTO
+# GATE: CONFIRMAÇÃO POR SMS (antes de agendar)
 # ======================
 with aba_agendar:
-    st.subheader("Agende seu horário")
+    st.subheader("✅ Confirme seu número para agendar")
 
-    nome = st.text_input("Nome da cliente")
-    data_atendimento = st.date_input("Data do atendimento", min_value=date.today())
+    # Se ainda não verificada, mostra tela de verificação e bloqueia o resto
+    if not st.session_state.cliente_verificada:
+        st.caption("Para evitar agendamentos falsos, confirme seu celular por SMS. Seu nome ficará fixo no sistema.")
 
-    servico = st.selectbox(
-        "Tipo de serviço",
-        ["Alongamento em Gel", "Alongamento em Fibra de Vidro", "Pedicure", "Manutenção"]
-    )
+        # Se já enviou OTP, mostramos o telefone travado para não confundir
+        if not st.session_state.otp_enviado:
+            nome_in = st.text_input("Seu nome (será fixo)", key="nome_gate")
+            phone_in = st.text_input("Seu celular/WhatsApp (DDD + número)", key="phone_gate")
 
-    horarios = ["07:00", "08:30", "10:00", "13:30", "15:00", "16:30", "18:00"]
-    ocupados = horarios_ocupados(data_atendimento)
-    disponiveis = [h for h in horarios if h not in ocupados]
-
-    st.markdown("**Horários disponíveis**")
-
-    if disponiveis:
-        with st.container(height=180):
-            horario_escolhido = st.radio(
-                "Escolha um horário",
-                disponiveis,
-                label_visibility="collapsed"
-            )
-    else:
-        horario_escolhido = None
-        st.warning("Nenhum horário disponível")
-
-    if st.button("Confirmar Agendamento 💅"):
-        if not nome or not horario_escolhido:
-            st.error("Preencha todos os campos")
+            if st.button("Enviar código por SMS"):
+                if not nome_in.strip() or not phone_in.strip():
+                    st.error("Preencha seu nome e telefone.")
+                else:
+                    phone_e164 = normalizar_phone_br(phone_in)
+                    try:
+                        send_otp(phone_e164)
+                        st.session_state.otp_enviado = True
+                        st.session_state.cliente_phone = phone_e164
+                        st.session_state.cliente_nome = nome_in.strip()
+                        st.success("Código enviado! Confira seu SMS.")
+                    except AuthApiError:
+                        st.error(
+                            "Não consegui enviar o SMS. Verifique no Supabase se o Provider 'Phone' está ativo e o provedor de SMS configurado."
+                        )
+                    except Exception:
+                        st.error("Erro ao enviar SMS. Tente novamente.")
         else:
-            resp = inserir_agendamento(nome, data_atendimento, horario_escolhido, servico)
+            st.info(f"Enviamos um código para: {st.session_state.cliente_phone}")
+            codigo = st.text_input("Digite o código (OTP) recebido por SMS", key="otp_code")
 
-            if getattr(resp, "error", None):
-                st.error("Esse horário acabou de ser ocupado. Escolha outro.")
-            else:
-                st.success("Agendamento registrado! 💖")
-                st.session_state.wa_link = montar_link_whatsapp(
-                    nome, data_atendimento, horario_escolhido, servico
-                )
-
-    # ===== BOTÃO FIXO WHATSAPP =====
-    if st.session_state.wa_link:
-        st.divider()
-        st.subheader("📲 Confirmar no WhatsApp")
-
-        st.link_button("Abrir WhatsApp para confirmar", st.session_state.wa_link)
-        st.caption("Se não abrir, copie e cole este link no navegador:")
-        st.code(st.session_state.wa_link)
-
-        if st.button("Limpar link de confirmação ✅"):
-            st.session_state.wa_link = None
-            st.rerun()
-
-# ======================
-# ABA: CATÁLOGO
-# ======================
-with aba_catalogo:
-    st.subheader("📒 Catálogo de Serviços")
-
-    try:
-        with open(CATALOGO_PDF, "rb") as f:
-            st.download_button(
-                "⬇️ Baixar catálogo (PDF)",
-                data=f,
-                file_name="catalogo.pdf",
-                mime="application/pdf"
-            )
-    except FileNotFoundError:
-        st.error("Arquivo 'catalogo.pdf' não encontrado no repositório.")
-        st.stop()
-
-    st.caption("Visualize o catálogo abaixo:")
-
-    with st.spinner("Carregando catálogo..."):
-        paginas_png = pdf_para_imagens(CATALOGO_PDF, zoom=2.0)
-
-    for i, img_bytes in enumerate(paginas_png, start=1):
-        st.markdown(f"**Página {i}**")
-        st.image(img_bytes, use_container_width=True)
-
-# ======================
-# ABA: ADMIN
-# ======================
-with aba_admin:
-    st.subheader("Área administrativa 🔐")
-
-    def sair_admin():
-        st.session_state.admin_logado = False
-        st.rerun()
-
-    if st.session_state.admin_logado:
-        st.success("Acesso liberado ✅")
-        if st.button("Sair"):
-            sair_admin()
-
-        df_admin = listar_agendamentos()
-        st.subheader("📋 Agendamentos")
-
-        filtrar = st.checkbox("Filtrar por data")
-        if filtrar:
-            data_filtro = st.date_input("Escolha a data", value=date.today(), key="filtro")
-            df_admin = df_admin[df_admin["Data"] == str(data_filtro)]
-
-        if df_admin.empty:
-            st.info("Nenhum agendamento encontrado.")
-        else:
-            st.dataframe(df_admin.drop(columns=["id"]), use_container_width=True)
-
-            st.subheader("🗑️ Excluir agendamento")
-            opcoes = df_admin.apply(
-                lambda r: f'#{r["id"]} | {r["Cliente"]} | {r["Data"]} | {r["Horário"]} | {r["Serviço"]}',
-                axis=1
-            ).tolist()
-
-            escolha = st.selectbox("Selecione", opcoes)
-            if st.button("Excluir ❌"):
-                ag_id = int(escolha.split("|")[0].replace("#", "").strip())
-                excluir_agendamento(ag_id)
-                st.success("Agendamento excluído")
-                st.rerun()
-
-        st.subheader("⬇️ Baixar CSV")
-        st.download_button(
-            "Baixar agendamentos.csv",
-            df_admin.drop(columns=["id"]).to_csv(index=False).encode("utf-8"),
-            file_name="agendamentos.csv",
-            mime="text/csv"
-        )
-
-    else:
-        with st.form("login_admin"):
-            senha = st.text_input("Senha da profissional", type="password")
-            entrar = st.form_submit_button("Entrar")
-
-        if entrar:
-            if senha.strip() == SENHA_ADMIN.strip():
-                st.session_state.admin_logado = True
-                st.rerun()
-            else:
-                st.error("Senha incorreta.")
+            col1, col2
