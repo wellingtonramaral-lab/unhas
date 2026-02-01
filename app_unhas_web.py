@@ -45,9 +45,6 @@ def pdf_para_imagens(caminho_pdf: str, zoom: float = 2.0):
 if "admin_logado" not in st.session_state:
     st.session_state.admin_logado = False
 
-if "pendente" not in st.session_state:
-    st.session_state.pendente = None
-
 if "wa_link" not in st.session_state:
     st.session_state.wa_link = None
 
@@ -127,6 +124,17 @@ def copiar_para_clipboard(texto: str):
         height=0
     )
 
+def abrir_em_nova_aba(url: str):
+    # tenta abrir em nova aba/janela no clique (se popup blocker permitir)
+    components.html(
+        f"""
+        <script>
+          window.open({json.dumps(url)}, "_blank");
+        </script>
+        """,
+        height=0
+    )
+
 # ======================
 # TABS
 # ======================
@@ -143,8 +151,7 @@ with aba_agendar:
     nome = st.text_input("Nome da cliente")
     data_atendimento = st.date_input("Data do atendimento", min_value=date.today())
 
-    # ===== (1) BLOQUEAR DOMINGO =====
-    # weekday(): 0=seg ... 6=dom
+    # (1) BLOQUEAR DOMINGO
     if data_atendimento.weekday() == 6:
         st.error("Não atendemos aos domingos. Escolha outra data.")
         st.stop()
@@ -155,10 +162,9 @@ with aba_agendar:
     )
 
     horarios = ["07:00", "08:30", "10:00", "13:30", "15:00", "16:30", "18:00"]
-
     ocupados = horarios_ocupados(data_atendimento)
 
-    # ===== (4) BLOQUEAR DIA LOTADO =====
+    # (4) BLOQUEAR DIA LOTADO
     if len(ocupados) >= len(horarios):
         st.warning("Esse dia está sem vagas. Escolha outra data.")
         st.stop()
@@ -167,34 +173,42 @@ with aba_agendar:
 
     st.markdown("**Horários disponíveis**")
     with st.container(height=180):
-        horario_escolhido = st.radio("Escolha um horário", disponiveis, label_visibility="collapsed")
+        horario_escolhido = st.radio(
+            "Escolha um horário",
+            disponiveis,
+            label_visibility="collapsed"
+        )
 
-    # Criar pendente (não salva ainda)
-    if st.button("Confirmar Agendamento 💅"):
+    st.divider()
+    st.subheader("📲 Confirmar no WhatsApp")
+
+    # Botão único: salva e abre WhatsApp
+    if st.button("📲 Confirmar no WhatsApp (salvar e abrir)"):
         if not nome or not horario_escolhido:
             st.error("Preencha todos os campos")
         else:
-            # checa novamente
+            # checa novamente para evitar corrida
             if horario_escolhido in horarios_ocupados(data_atendimento):
                 st.error("Esse horário acabou de ser ocupado. Escolha outro.")
             else:
-                st.session_state.pendente = {
-                    "cliente": nome.strip(),
-                    "data": data_atendimento,
-                    "horario": horario_escolhido,
-                    "servico": servico
-                }
-                st.session_state.wa_link = montar_link_whatsapp(
-                    nome.strip(), data_atendimento, horario_escolhido, servico
-                )
-                st.success("Quase lá! Confirme no WhatsApp 👇")
+                # salva primeiro
+                resp = inserir_agendamento(nome.strip(), data_atendimento, horario_escolhido, servico)
+                if getattr(resp, "error", None):
+                    st.error("Não foi possível salvar agora. Tente novamente.")
+                else:
+                    st.session_state.wa_link = montar_link_whatsapp(
+                        nome.strip(), data_atendimento, horario_escolhido, servico
+                    )
+                    st.success("Agendamento confirmado e registrado! 💖 Abrindo WhatsApp...")
 
-    # Bloco WhatsApp + copiar
-    if st.session_state.pendente and st.session_state.wa_link:
-        st.divider()
-        st.subheader("📲 Passo 1: Confirme no WhatsApp")
+                    # tenta abrir WhatsApp automaticamente
+                    abrir_em_nova_aba(st.session_state.wa_link)
+                    st.toast("Se não abrir, use Copiar link ✅", icon="📋")
 
+    # Se já tiver link, mostra botões limpos (abrir + copiar)
+    if st.session_state.wa_link:
         c1, c2 = st.columns(2)
+
         with c1:
             st.link_button("📲 Abrir WhatsApp", st.session_state.wa_link)
 
@@ -207,34 +221,9 @@ with aba_agendar:
             st.toast("Link copiado ✅", icon="📋")
             st.session_state.do_copy = False
 
-        st.subheader("✅ Passo 2: Depois de enviar, finalize")
-
-        col1, col2 = st.columns(2)
-        with col1:
-            if st.button("✅ Já enviei no WhatsApp — Finalizar"):
-                p = st.session_state.pendente
-
-                # checa de novo disponibilidade
-                if p["horario"] in horarios_ocupados(p["data"]):
-                    st.error("Esse horário foi ocupado antes da finalização. Escolha outro.")
-                else:
-                    resp = inserir_agendamento(
-                        p["cliente"], p["data"], p["horario"], p["servico"]
-                    )
-                    if getattr(resp, "error", None):
-                        st.error("Não foi possível salvar agora. Tente novamente.")
-                    else:
-                        st.success("Agendamento FINALIZADO com sucesso! 💖")
-                        st.session_state.pendente = None
-                        st.session_state.wa_link = None
-                        st.rerun()
-
-        with col2:
-            if st.button("❌ Cancelar"):
-                st.session_state.pendente = None
-                st.session_state.wa_link = None
-                st.info("Agendamento cancelado.")
-                st.rerun()
+        if st.button("Limpar link"):
+            st.session_state.wa_link = None
+            st.rerun()
 
 # ======================
 # ABA: CATÁLOGO
