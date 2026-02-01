@@ -105,6 +105,13 @@ if "ultimo_ag" not in st.session_state:
 if "copy_text" not in st.session_state:
     st.session_state.copy_text = None
 
+# Anti-duplo clique / idempotência
+if "reservando" not in st.session_state:
+    st.session_state.reservando = False
+
+if "ultima_chave_reserva" not in st.session_state:
+    st.session_state.ultima_chave_reserva = None
+
 
 # ======================
 # HELPERS
@@ -128,6 +135,21 @@ def parse_dt(dt_str: str) -> datetime | None:
 
 def agora_utc() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def limpar_confirmacao():
+    st.session_state.wa_link = None
+    st.session_state.ultimo_ag = None
+    st.session_state.copy_text = None
+    st.session_state.reservando = False
+    st.session_state.ultima_chave_reserva = None
+    st.rerun()
+
+
+def make_reserva_key(nome: str, data_at: date, horario: str, servico: str) -> str:
+    # chave simples para impedir clique duplo criando 2 inserts
+    base = f"{nome.strip().lower()}|{data_at.isoformat()}|{horario}|{servico}"
+    return base
 
 
 # ======================
@@ -252,13 +274,6 @@ def montar_link_whatsapp(texto: str):
     return f"https://wa.me/{WHATSAPP_NUMERO}?text={text_encoded}"
 
 
-def limpar_confirmacao():
-    st.session_state.wa_link = None
-    st.session_state.ultimo_ag = None
-    st.session_state.copy_text = None
-    st.rerun()
-
-
 # ======================
 # TABS
 # ======================
@@ -275,10 +290,9 @@ with aba_agendar:
     nome = st.text_input("Nome da cliente")
     data_atendimento = st.date_input("Data do atendimento", min_value=date.today())
 
-    # BLOQUEAR DOMINGO
-    if data_atendimento.weekday() == 6:
-        st.error("Não atendemos aos domingos. Escolha outra data.")
-        st.stop()
+    eh_domingo = (data_atendimento.weekday() == 6)
+    if eh_domingo:
+        st.warning("Não atendemos aos domingos. Escolha outra data para agendar.")
 
     servico = st.selectbox("Tipo de serviço", list(PRECOS.keys()))
 
@@ -288,13 +302,14 @@ with aba_agendar:
     st.caption(f"Valor do serviço: **{fmt_brl(total_servico)}** • Sinal para reservar: **{fmt_brl(valor_sinal)}**")
 
     horarios = ["07:00", "08:30", "10:00", "13:30", "15:00", "16:30", "18:00"]
-    ocupados = horarios_ocupados(data_atendimento)
 
-    if len(ocupados) >= len(horarios):
+    ocupados = horarios_ocupados(data_atendimento) if not eh_domingo else set()
+    dia_lotado = (len(ocupados) >= len(horarios)) if not eh_domingo else False
+
+    if dia_lotado:
         st.warning("Esse dia está sem vagas. Escolha outra data.")
-        st.stop()
 
-    disponiveis = [h for h in horarios if h not in ocupados]
+    disponiveis = [h for h in horarios if h not in ocupados] if not eh_domingo else horarios
 
     st.markdown("**Horários disponíveis**")
     with st.container(height=180):
@@ -304,8 +319,14 @@ with aba_agendar:
 
     left, r1, r2, r3 = st.columns([1.2, 1, 1, 0.9])
 
+    pode_agendar = (not eh_domingo) and (not dia_lotado) and (not st.session_state.reservando)
+
     with left:
-        reservar_click = st.button("💳 Reservar e pagar sinal", use_container_width=True)
+        reservar_click = st.button(
+            "💳 Reservar e pagar sinal",
+            use_container_width=True,
+            disabled=not pode_agendar
+        )
 
     with r1:
         if st.session_state.wa_link:
@@ -332,44 +353,63 @@ with aba_agendar:
             copiar_para_clipboard(PIX_CHAVE)
             st.toast("Chave Pix copiada ✅", icon="🔑")
 
+    # ===== AÇÃO DO RESERVAR =====
     if reservar_click:
         if not nome or not horario_escolhido:
             st.error("Preencha todos os campos.")
         else:
-            # checa novamente (anti-corrida)
-            if horario_escolhido in horarios_ocupados(data_atendimento):
-                st.error("Esse horário acabou de ser ocupado. Escolha outro.")
-            else:
-                resp = inserir_pre_agendamento(
-                    nome.strip(),
-                    data_atendimento,
-                    horario_escolhido,
-                    servico,
-                    valor_sinal
-                )
+            # trava clique duplo
+            st.session_state.reservando = True
 
-                if getattr(resp, "error", None):
-                    st.error("Não foi possível salvar agora. Tente novamente.")
+            chave = make_reserva_key(nome, data_atendimento, horario_escolhido, servico)
+            if st.session_state.ultima_chave_reserva == chave:
+                st.warning("Você já enviou esse agendamento. Se precisar, clique em Limpar e tente novamente.")
+                st.session_state.reservando = False
+            else:
+                # checa anti-corrida (horário ocupado)
+                if horario_escolhido in horarios_ocupados(data_atendimento):
+                    st.error("Esse horário acabou de ser ocupado. Escolha outro.")
+                    st.session_state.reservando = False
                 else:
-                    mensagem = montar_mensagem_pagamento(
+                    resp = inserir_pre_agendamento(
                         nome.strip(),
                         data_atendimento,
                         horario_escolhido,
                         servico,
                         valor_sinal
                     )
-                    st.session_state.copy_text = mensagem
-                    st.session_state.wa_link = montar_link_whatsapp(mensagem)
-                    st.session_state.ultimo_ag = {
-                        "cliente": nome.strip(),
-                        "data": data_atendimento.strftime("%d/%m/%Y"),
-                        "horario": horario_escolhido,
-                        "servico": servico,
-                        "sinal": valor_sinal,
-                        "status": "pendente"
-                    }
-                    st.success("Reserva criada como **PENDENTE**. Envie a mensagem no WhatsApp e pague o sinal via Pix.")
-                    st.rerun()
+
+                    # se o índice único barrar duplicado, resp pode vir com erro
+                    if getattr(resp, "error", None):
+                        # tenta reconhecer duplicidade pelo texto
+                        err_txt = str(resp.error)
+                        if "duplicate key" in err_txt.lower() or "23505" in err_txt:
+                            st.warning("Esse horário já foi reservado. Escolha outro.")
+                        else:
+                            st.error("Não foi possível salvar agora. Tente novamente.")
+                        st.session_state.reservando = False
+                    else:
+                        mensagem = montar_mensagem_pagamento(
+                            nome.strip(),
+                            data_atendimento,
+                            horario_escolhido,
+                            servico,
+                            valor_sinal
+                        )
+                        st.session_state.copy_text = mensagem
+                        st.session_state.wa_link = montar_link_whatsapp(mensagem)
+                        st.session_state.ultimo_ag = {
+                            "cliente": nome.strip(),
+                            "data": data_atendimento.strftime("%d/%m/%Y"),
+                            "horario": horario_escolhido,
+                            "servico": servico,
+                            "sinal": valor_sinal,
+                            "status": "pendente"
+                        }
+                        st.session_state.ultima_chave_reserva = chave
+                        st.session_state.reservando = False
+                        st.success("Reserva criada como **PENDENTE**. Envie a mensagem no WhatsApp e pague o sinal via Pix.")
+                        st.rerun()
 
     if st.session_state.ultimo_ag:
         u = st.session_state.ultimo_ag
@@ -394,14 +434,13 @@ with aba_catalogo:
             )
     except FileNotFoundError:
         st.error("Arquivo 'catalogo.pdf' não encontrado no repositório.")
-        st.stop()
+    else:
+        with st.spinner("Carregando catálogo..."):
+            paginas = pdf_para_imagens_com_fundo_branco(CATALOGO_PDF, zoom=2.0)
 
-    with st.spinner("Carregando catálogo..."):
-        paginas = pdf_para_imagens_com_fundo_branco(CATALOGO_PDF, zoom=2.0)
-
-    for i, img_bytes in enumerate(paginas, start=1):
-        st.markdown(f"**Página {i}**")
-        st.image(img_bytes, use_container_width=True)
+        for i, img_bytes in enumerate(paginas, start=1):
+            st.markdown(f"**Página {i}**")
+            st.image(img_bytes, use_container_width=True)
 
 # ======================
 # ABA: ADMIN
