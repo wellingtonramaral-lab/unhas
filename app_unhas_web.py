@@ -8,6 +8,14 @@ from PIL import Image
 import io
 from postgrest.exceptions import APIError
 
+# timezone Brasil (UTC-3)
+try:
+    from zoneinfo import ZoneInfo
+    LOCAL_TZ = ZoneInfo("America/Sao_Paulo")
+except Exception:
+    LOCAL_TZ = timezone(timedelta(hours=-3))
+
+
 # ======================
 # SECRETS
 # ======================
@@ -55,7 +63,6 @@ def fmt_brl(v: float) -> str:
 
 
 def calcular_sinal(_servicos: list[str]) -> float:
-    # sinal fixo
     return float(VALOR_SINAL_FIXO)
 
 
@@ -64,15 +71,12 @@ def normalizar_servicos(servicos: list[str]) -> list[str]:
 
 
 def servicos_para_texto(servicos: list[str]) -> str:
-    # guarda no banco como texto simples
-    # exemplo: "Alongamento em Gel + Pedicure"
     return " + ".join(normalizar_servicos(servicos))
 
 
 def texto_para_lista_servicos(texto: str) -> list[str]:
     if not texto:
         return []
-    # separa por "+"
     parts = [p.strip() for p in texto.split("+")]
     return [p for p in parts if p]
 
@@ -85,7 +89,6 @@ def calcular_total_servicos(servicos: list[str]) -> float:
 
 
 def calcular_total_por_texto_servico(texto_servico: str) -> float:
-    # usado no admin (quando vem "A + B")
     servs = texto_para_lista_servicos(texto_servico)
     return calcular_total_servicos(servs)
 
@@ -166,6 +169,23 @@ def agora_utc() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def agora_local() -> datetime:
+    return datetime.now(LOCAL_TZ)
+
+
+def agendamento_dt_local(data_str: str, horario_str: str) -> datetime | None:
+    """
+    Converte (data yyyy-mm-dd + horario HH:MM) em datetime local com tz.
+    """
+    try:
+        d = datetime.strptime(str(data_str), "%Y-%m-%d").date()
+        hh, mm = str(horario_str).split(":")
+        dt = datetime(d.year, d.month, d.day, int(hh), int(mm), 0, tzinfo=LOCAL_TZ)
+        return dt
+    except Exception:
+        return None
+
+
 def make_reserva_key(nome: str, data_at: date, horario: str, servicos: list[str]) -> str:
     serv_txt = servicos_para_texto(servicos).lower()
     return f"{nome.strip().lower()}|{data_at.isoformat()}|{horario}|{serv_txt}"
@@ -221,6 +241,38 @@ def limpar_pendentes_expirados():
         .execute()
 
 
+def atualizar_finalizados():
+    """
+    Se status = 'pago' e já passou do horário, muda para 'finalizado'.
+    Roda no Admin (e pode rodar sempre sem problema).
+    """
+    try:
+        hoje = date.today().isoformat()
+        resp = (
+            supabase
+            .table("agendamentos")
+            .select("id,data,horario,status")
+            .eq("status", "pago")
+            .lte("data", hoje)  # só até hoje
+            .execute()
+        )
+
+        rows = resp.data or []
+        now = agora_local()
+
+        for r in rows:
+            ag_id = r.get("id")
+            dt = agendamento_dt_local(r.get("data"), r.get("horario"))
+            if dt is None:
+                continue
+            if dt < now:
+                supabase.table("agendamentos").update({"status": "finalizado"}).eq("id", ag_id).execute()
+
+    except Exception:
+        # se falhar por qualquer motivo, não quebra o app
+        return
+
+
 def horarios_ocupados(data_escolhida: date):
     resp = (
         supabase
@@ -239,7 +291,7 @@ def horarios_ocupados(data_escolhida: date):
         status = (r.get("status") or "").lower().strip()
         created_at = parse_dt(r.get("created_at", ""))
 
-        if status == "pago":
+        if status in ("pago", "finalizado"):
             ocupados.add(horario)
             continue
 
@@ -361,7 +413,6 @@ with aba_agendar:
     if eh_domingo:
         st.warning("Não atendemos aos domingos. Escolha outra data para agendar.")
 
-    # ✅ Agora pode escolher mais de 1 serviço
     servicos_escolhidos = st.multiselect(
         "Tipo de serviço (pode escolher mais de um)",
         options=list(PRECOS.keys()),
@@ -380,7 +431,6 @@ with aba_agendar:
     horarios = horarios_do_dia(data_atendimento)
 
     if eh_domingo or not horarios:
-        ocupados = set()
         disponiveis = []
     else:
         ocupados = horarios_ocupados(data_atendimento)
@@ -474,13 +524,6 @@ with aba_agendar:
                             st.success("Reserva criada como **PENDENTE**. Clique em **Abrir WhatsApp** para enviar a mensagem.")
                             st.rerun()
 
-    if st.session_state.ultimo_ag:
-        u = st.session_state.ultimo_ag
-        st.caption(
-            f"Última reserva: **{u['cliente']}** • **{u['data']}** • **{u['horario']}** • "
-            f"**{u.get('servicos','')}** • **{fmt_brl(float(u.get('sinal', 0.0)))}** • **{u.get('status', '').upper()}**"
-        )
-
 # ======================
 # ABA: CATÁLOGO
 # ======================
@@ -516,6 +559,9 @@ with aba_admin:
         st.rerun()
 
     if st.session_state.admin_logado:
+        # ✅ Atualiza finalizados automaticamente ao abrir admin
+        atualizar_finalizados()
+
         st.success("Acesso liberado ✅")
         if st.button("Sair"):
             sair_admin()
@@ -528,8 +574,6 @@ with aba_admin:
             st.info("Nenhum agendamento encontrado.")
         else:
             df_admin["Data_dt"] = pd.to_datetime(df_admin["Data"], errors="coerce")
-
-            # ✅ preço somando múltiplos serviços
             df_admin["Preço do serviço"] = df_admin["Serviço(s)"].apply(calcular_total_por_texto_servico).astype(float)
 
             # ===== FILTRO DE PERÍODO =====
@@ -560,9 +604,10 @@ with aba_admin:
             elif periodo == "Ano":
                 df_filtrado = df_filtrado[df_filtrado["Data_dt"].dt.year == int(ano_sel)]
 
+            # ===== FILTRO DE STATUS (AGORA COM FINALIZADO) =====
             filtrar_status = st.checkbox("Filtrar por status")
             if filtrar_status:
-                status_sel = st.selectbox("Status", ["pendente", "pago"])
+                status_sel = st.selectbox("Status", ["pendente", "pago", "finalizado"])
                 df_filtrado = df_filtrado[df_filtrado["Status"].str.lower() == status_sel]
 
             total_servicos = float(df_filtrado["Preço do serviço"].sum()) if not df_filtrado.empty else 0.0
