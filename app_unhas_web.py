@@ -4,8 +4,6 @@ from datetime import date, datetime, timedelta, timezone
 import urllib.parse
 from supabase import create_client
 import fitz  # PyMuPDF
-import json
-import streamlit.components.v1 as components
 from PIL import Image
 import io
 from postgrest.exceptions import APIError
@@ -22,7 +20,7 @@ PIX_CHAVE = st.secrets.get("PIX_CHAVE", "")
 PIX_NOME = st.secrets.get("PIX_NOME", "Profissional")
 PIX_CIDADE = st.secrets.get("PIX_CIDADE", "BRASIL")
 
-# 60 minutos (você disse que vai manter)
+# você confirmou que quer 60 minutos
 TEMPO_EXPIRACAO_MIN = int(st.secrets.get("TEMPO_EXPIRACAO_MIN", 60))
 
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
@@ -103,9 +101,6 @@ if "wa_link" not in st.session_state:
 if "ultimo_ag" not in st.session_state:
     st.session_state.ultimo_ag = None
 
-if "copy_text" not in st.session_state:
-    st.session_state.copy_text = None
-
 # anti duplo clique / idempotência
 if "reservando" not in st.session_state:
     st.session_state.reservando = False
@@ -117,13 +112,6 @@ if "ultima_chave_reserva" not in st.session_state:
 # ======================
 # HELPERS
 # ======================
-def copiar_para_clipboard(texto: str):
-    components.html(
-        f"<script>navigator.clipboard.writeText({json.dumps(texto)});</script>",
-        height=0
-    )
-
-
 def parse_dt(dt_str: str) -> datetime | None:
     if not dt_str:
         return None
@@ -136,15 +124,6 @@ def parse_dt(dt_str: str) -> datetime | None:
 
 def agora_utc() -> datetime:
     return datetime.now(timezone.utc)
-
-
-def limpar_confirmacao():
-    st.session_state.wa_link = None
-    st.session_state.ultimo_ag = None
-    st.session_state.copy_text = None
-    st.session_state.reservando = False
-    st.session_state.ultima_chave_reserva = None
-    st.rerun()
 
 
 def make_reserva_key(nome: str, data_at: date, horario: str, servico: str) -> str:
@@ -189,8 +168,7 @@ def listar_agendamentos():
 
 def limpar_pendentes_expirados():
     """
-    Remove do banco os 'pendente' vencidos para NÃO travar o índice unique (data, horario)
-    quando o app considerar o horário novamente disponível.
+    Remove do banco os 'pendente' vencidos (60 min) para NÃO travar o índice unique (data, horario).
     """
     if TEMPO_EXPIRACAO_MIN <= 0:
         return
@@ -198,7 +176,6 @@ def limpar_pendentes_expirados():
     cutoff_dt = agora_utc() - timedelta(minutes=TEMPO_EXPIRACAO_MIN)
     cutoff_iso = cutoff_dt.isoformat()
 
-    # delete pendentes vencidos
     supabase.table("agendamentos") \
         .delete() \
         .eq("status", "pendente") \
@@ -251,7 +228,7 @@ def horarios_ocupados(data_escolhida: date):
 def cliente_ja_agendou_no_dia(cliente: str, data_escolhida: date) -> bool:
     """
     Trava no APP: mesmo cliente não agenda 2x no mesmo dia.
-    (O ideal é ter o índice agendamento_cliente_dia no banco também.)
+    (Recomendado também ter índice no banco: data + cliente_norm)
     """
     try:
         resp = (
@@ -259,18 +236,16 @@ def cliente_ja_agendou_no_dia(cliente: str, data_escolhida: date) -> bool:
             .table("agendamentos")
             .select("id")
             .eq("data", data_escolhida.isoformat())
-            .ilike("cliente", cliente.strip())  # compara ignorando caixa
+            .ilike("cliente", cliente.strip())
             .limit(1)
             .execute()
         )
         return bool(resp.data)
     except Exception:
-        # se falhar por qualquer motivo, não bloqueia aqui (deixa o banco decidir)
         return False
 
 
 def inserir_pre_agendamento(cliente, data_escolhida: date, horario, servico, valor_sinal: float):
-    # garante que pendentes vencidos não vão travar o índice unique
     limpar_pendentes_expirados()
 
     payload = {
@@ -287,13 +262,13 @@ def inserir_pre_agendamento(cliente, data_escolhida: date, horario, servico, val
     except APIError as e:
         msg = str(e).lower()
 
-        # duplicidade horário (data+horario)
-        if "agendamento_unico" in msg or "duplicate key" in msg or "23505" in msg:
-            # pode ser também cliente+dia. vamos tentar diferenciar:
-            if "cliente_norm" in msg or "agendamento_cliente_dia" in msg:
-                st.warning("Você já fez um agendamento para esse dia. Se quiser mudar, fale com a profissional.")
-                return None
+        # duplicidade de cliente no dia (se você criou o índice agendamento_cliente_dia)
+        if "agendamento_cliente_dia" in msg or "cliente_norm" in msg:
+            st.warning("Você já fez um agendamento para esse dia. Se quiser mudar, fale com a profissional.")
+            return None
 
+        # duplicidade de horário (data+horario)
+        if "agendamento_unico" in msg or "duplicate key" in msg or "23505" in msg:
             st.warning("Esse horário já foi reservado. Escolha outro.")
             return None
 
@@ -378,7 +353,7 @@ with aba_agendar:
 
     pode_agendar = (not eh_domingo) and (not dia_lotado) and (not st.session_state.reservando)
 
-    left, r1, r2, r3 = st.columns([1.2, 1, 1, 0.9])
+    left, right = st.columns([1.2, 1])
 
     with left:
         reservar_click = st.button(
@@ -387,30 +362,14 @@ with aba_agendar:
             disabled=not pode_agendar
         )
 
-    with r1:
+    with right:
         if st.session_state.wa_link:
             st.link_button("📲 Abrir WhatsApp", st.session_state.wa_link, use_container_width=True)
-        else:
-            st.write("")
 
-    with r2:
-        if st.session_state.copy_text:
-            if st.button("📋 Copiar mensagem", use_container_width=True):
-                copiar_para_clipboard(st.session_state.copy_text)
-                st.toast("Mensagem copiada ✅", icon="📋")
-        else:
-            st.write("")
-
-    with r3:
-        if st.session_state.wa_link:
-            st.button("🧹 Limpar", use_container_width=True, on_click=limpar_confirmacao)
-        else:
-            st.write("")
-
+    # Botão de Pix (mantive)
     if PIX_CHAVE and st.session_state.wa_link:
         if st.button("🔑 Copiar chave Pix", use_container_width=True):
-            copiar_para_clipboard(PIX_CHAVE)
-            st.toast("Chave Pix copiada ✅", icon="🔑")
+            st.toast("Chave Pix (copie manualmente): " + PIX_CHAVE, icon="🔑")
 
     # ===== AÇÃO DO RESERVAR =====
     if reservar_click:
@@ -419,18 +378,15 @@ with aba_agendar:
         else:
             st.session_state.reservando = True
 
-            # trava idempotência (mesmo clique/mesmo agendamento repetido)
             chave = make_reserva_key(nome, data_atendimento, horario_escolhido, servico)
             if st.session_state.ultima_chave_reserva == chave:
-                st.warning("Você já enviou esse agendamento. Se precisar, clique em Limpar e tente novamente.")
+                st.warning("Você já enviou esse agendamento. Se quiser mudar, fale com a profissional.")
                 st.session_state.reservando = False
             else:
-                # trava: cliente não pode agendar 2x no mesmo dia
                 if cliente_ja_agendou_no_dia(nome, data_atendimento):
                     st.warning("Você já fez um agendamento para esse dia. Se quiser mudar, fale com a profissional.")
                     st.session_state.reservando = False
                 else:
-                    # checa de novo (anti-corrida)
                     if horario_escolhido in horarios_ocupados(data_atendimento):
                         st.warning("Esse horário já foi reservado. Escolha outro.")
                         st.session_state.reservando = False
@@ -453,7 +409,6 @@ with aba_agendar:
                                 servico,
                                 valor_sinal
                             )
-                            st.session_state.copy_text = mensagem
                             st.session_state.wa_link = montar_link_whatsapp(mensagem)
                             st.session_state.ultimo_ag = {
                                 "cliente": nome.strip(),
@@ -465,7 +420,7 @@ with aba_agendar:
                             }
                             st.session_state.ultima_chave_reserva = chave
                             st.session_state.reservando = False
-                            st.success("Reserva criada como **PENDENTE**. Envie a mensagem no WhatsApp e pague o sinal via Pix.")
+                            st.success("Reserva criada como **PENDENTE**. Clique em **Abrir WhatsApp** para enviar a mensagem.")
                             st.rerun()
 
     if st.session_state.ultimo_ag:
