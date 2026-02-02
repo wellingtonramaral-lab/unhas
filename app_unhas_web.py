@@ -14,7 +14,7 @@ import requests
 query = st.query_params
 PUBLIC_TENANT_ID = query.get("t")
 
-# streamlit às vezes devolve lista de valores
+# Streamlit às vezes devolve lista no query param
 if isinstance(PUBLIC_TENANT_ID, list):
     PUBLIC_TENANT_ID = PUBLIC_TENANT_ID[0]
 
@@ -31,7 +31,7 @@ except Exception:
 # SECRETS
 # ======================
 SENHA_ADMIN = st.secrets["SENHA_ADMIN"]
-WHATSAPP_NUMERO = st.secrets["WHATSAPP_NUMERO"]  # ex: 5548999999999
+WHATSAPP_NUMERO = st.secrets["WHATSAPP_NUMERO"]  # só números, ex: 5548999999999
 SUPABASE_URL = st.secrets["SUPABASE_URL"]
 SUPABASE_KEY = st.secrets["SUPABASE_SERVICE_ROLE_KEY"]  # (por enquanto) admin sem login
 
@@ -39,20 +39,34 @@ PIX_CHAVE = st.secrets.get("PIX_CHAVE", "")
 PIX_NOME = st.secrets.get("PIX_NOME", "Profissional")
 PIX_CIDADE = st.secrets.get("PIX_CIDADE", "BRASIL")
 
+# 60 minutos por padrão
 TEMPO_EXPIRACAO_MIN = int(st.secrets.get("TEMPO_EXPIRACAO_MIN", 60))
 
+# (Opcional) se sua function exigir Authorization, descomente e use o ANON_KEY
+SUPABASE_ANON_KEY = st.secrets.get("SUPABASE_ANON_KEY", "")
+
 # ======================
-# SUPABASE CLIENT
+# SUPABASE CLIENT (ADMIN)
 # ======================
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # ======================
-# EDGE FUNCTIONS
+# EDGE FUNCTIONS (URLs reais do seu Supabase)
 # ======================
-# Project ref: yrppduxsjerwhbgxpuxx
-EDGE_BASE_URL = "https://yrppduxsjerwhbgxpuxx.functions.supabase.co"
-URL_HORARIOS = f"{EDGE_BASE_URL}/public-horarios-ocupados"
-URL_RESERVAR = f"{EDGE_BASE_URL}/public-criar-reserva"
+# public-criar-reserva -> /functions/v1/super-api
+URL_RESERVAR = "https://yrppduxsjerwhbgxpuxx.supabase.co/functions/v1/super-api"
+
+# public-horarios-ocupados -> /functions/v1/hyper-action
+URL_HORARIOS = "https://yrppduxsjerwhbgxpuxx.supabase.co/functions/v1/hyper-action"
+
+# Headers (use Authorization só se sua function pedir)
+def fn_headers():
+    h = {"Content-Type": "application/json"}
+    # Se começar a dar 401/403, ative Authorization:
+    if SUPABASE_ANON_KEY:
+        h["Authorization"] = f"Bearer {SUPABASE_ANON_KEY}"
+    return h
+
 
 # ======================
 # CONFIG STREAMLIT
@@ -120,12 +134,12 @@ def calcular_total_por_texto_servico(texto_servico: str) -> float:
 # HORÁRIOS POR DIA
 # ======================
 def horarios_do_dia(d: date) -> list[str]:
-    wd = d.weekday()
+    wd = d.weekday()  # 0=seg ... 5=sab ... 6=dom
     if wd in [0, 1, 2, 3, 4]:  # seg-sex
         return ["18:00"]
     if wd == 5:  # sábado
         return ["10:30", "14:00", "18:00"]
-    return []
+    return []  # domingo
 
 
 # ======================
@@ -161,10 +175,13 @@ def pdf_para_imagens_com_fundo_branco(caminho_pdf: str, zoom: float = 2.0):
 # ======================
 if "admin_logado" not in st.session_state:
     st.session_state.admin_logado = False
+
 if "wa_link" not in st.session_state:
     st.session_state.wa_link = None
+
 if "reservando" not in st.session_state:
     st.session_state.reservando = False
+
 if "ultima_chave_reserva" not in st.session_state:
     st.session_state.ultima_chave_reserva = None
 
@@ -211,10 +228,15 @@ def horarios_ocupados_publico(tenant_id: str, data_escolhida: date) -> set[str]:
     try:
         resp = requests.post(
             URL_HORARIOS,
+            headers=fn_headers(),
             json={"tenant_id": str(tenant_id), "data": data_escolhida.isoformat()},
             timeout=12
         )
+
         if resp.status_code != 200:
+            # debug opcional
+            st.warning(f"Falha ao buscar horários (HTTP {resp.status_code}).")
+            st.code(resp.text)
             return set()
 
         payload = resp.json()
@@ -246,7 +268,9 @@ def horarios_ocupados_publico(tenant_id: str, data_escolhida: date) -> set[str]:
 
         return ocupados
 
-    except Exception:
+    except Exception as e:
+        st.warning("Erro ao chamar horários ocupados.")
+        st.code(str(e))
         return set()
 
 
@@ -268,9 +292,13 @@ def inserir_pre_agendamento_publico(
     }
 
     try:
-        resp = requests.post(URL_RESERVAR, json=payload, timeout=12)
+        resp = requests.post(
+            URL_RESERVAR,
+            headers=fn_headers(),
+            json=payload,
+            timeout=12
+        )
 
-        # Mostra motivo real se der erro
         if resp.status_code != 200:
             st.error(f"Erro ao criar reserva (HTTP {resp.status_code}).")
             st.code(resp.text)
@@ -285,13 +313,13 @@ def inserir_pre_agendamento_publico(
         return out
 
     except Exception as e:
-        st.error("Falha de rede ao chamar a função.")
+        st.error("Falha de rede ao chamar a função de reserva.")
         st.code(str(e))
         return None
 
 
 # ======================
-# SUPABASE (ADMIN) - por tenant
+# SUPABASE (ADMIN) - sempre filtra tenant_id
 # ======================
 def listar_agendamentos_admin(tenant_id: str):
     resp = (
@@ -303,6 +331,7 @@ def listar_agendamentos_admin(tenant_id: str):
         .order("horario")
         .execute()
     )
+
     df = pd.DataFrame(resp.data or [])
     if df.empty:
         return pd.DataFrame(columns=["id", "Cliente", "Data", "Horário", "Serviço(s)", "Status", "Sinal", "Criado em"])
@@ -321,6 +350,7 @@ def listar_agendamentos_admin(tenant_id: str):
     df["Horário"] = df["Horário"].astype(str)
     df["Status"] = df["Status"].astype(str)
     df["Sinal"] = df["Sinal"].apply(lambda x: float(x) if x is not None else 0.0)
+
     return df
 
 
@@ -348,6 +378,7 @@ def atualizar_finalizados_admin(tenant_id: str):
             .lte("data", hoje)
             .execute()
         )
+
         rows = resp.data or []
         now = agora_local()
 
@@ -406,7 +437,7 @@ def montar_link_whatsapp(texto: str):
 aba_agendar, aba_catalogo, aba_admin = st.tabs(["💅 Agendamento", "📒 Catálogo", "🔐 Admin"])
 
 # ======================
-# ABA: AGENDAMENTO
+# ABA: AGENDAMENTO (PÚBLICO)
 # ======================
 with aba_agendar:
     st.subheader("Agende seu horário")
@@ -483,8 +514,8 @@ with aba_agendar:
             st.error("Preencha todos os campos e selecione pelo menos 1 serviço.")
         else:
             st.session_state.reservando = True
-            chave = make_reserva_key(nome, data_atendimento, horario_escolhido, servicos_escolhidos)
 
+            chave = make_reserva_key(nome, data_atendimento, horario_escolhido, servicos_escolhidos)
             if st.session_state.ultima_chave_reserva == chave:
                 st.warning("Você já enviou esse agendamento. Se quiser mudar, fale com a profissional.")
                 st.session_state.reservando = False
@@ -648,6 +679,25 @@ with aba_admin:
                     excluir_agendamento_admin(PUBLIC_TENANT_ID, ag_id)
                     st.success("Excluído ✅")
                     st.rerun()
+
+            st.subheader("⬇️ Baixar CSV (filtrado)")
+            if not df_filtrado.empty:
+                df_csv = df_filtrado.drop(columns=["Data_dt"]).copy()
+                df_csv["Preço do serviço"] = df_csv["Preço do serviço"].apply(lambda v: fmt_brl(float(v)))
+                df_csv["Sinal"] = df_csv["Sinal"].apply(lambda v: fmt_brl(float(v)))
+                st.download_button(
+                    "Baixar agendamentos_filtrado.csv",
+                    df_csv.drop(columns=["id"]).to_csv(index=False).encode("utf-8"),
+                    file_name="agendamentos_filtrado.csv",
+                    mime="text/csv"
+                )
+            else:
+                st.download_button(
+                    "Baixar agendamentos_filtrado.csv",
+                    pd.DataFrame().to_csv(index=False).encode("utf-8"),
+                    file_name="agendamentos_filtrado.csv",
+                    mime="text/csv"
+                )
 
     else:
         with st.form("login_admin"):
