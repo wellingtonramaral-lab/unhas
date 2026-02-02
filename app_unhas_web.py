@@ -6,14 +6,17 @@ from supabase import create_client
 import fitz  # PyMuPDF
 from PIL import Image
 import io
-from postgrest.exceptions import APIError
 import requests
 
 # ======================
-# TENANT via Query Param
+# QUERY PARAMS (TENANT)
 # ======================
 query = st.query_params
-PUBLIC_TENANT_ID = query.get("t")  # precisa ser o tenants.id (não o owner_user_id)
+PUBLIC_TENANT_ID = query.get("t")
+
+# streamlit às vezes devolve lista de valores
+if isinstance(PUBLIC_TENANT_ID, list):
+    PUBLIC_TENANT_ID = PUBLIC_TENANT_ID[0]
 
 # ======================
 # TIMEZONE Brasil (UTC-3)
@@ -28,9 +31,9 @@ except Exception:
 # SECRETS
 # ======================
 SENHA_ADMIN = st.secrets["SENHA_ADMIN"]
-WHATSAPP_NUMERO = st.secrets["WHATSAPP_NUMERO"]  # só números, ex: 5548999999999
+WHATSAPP_NUMERO = st.secrets["WHATSAPP_NUMERO"]  # ex: 5548999999999
 SUPABASE_URL = st.secrets["SUPABASE_URL"]
-SUPABASE_KEY = st.secrets["SUPABASE_SERVICE_ROLE_KEY"]  # (por enquanto) pra admin funcionar sem login
+SUPABASE_KEY = st.secrets["SUPABASE_SERVICE_ROLE_KEY"]  # (por enquanto) admin sem login
 
 PIX_CHAVE = st.secrets.get("PIX_CHAVE", "")
 PIX_NOME = st.secrets.get("PIX_NOME", "Profissional")
@@ -44,9 +47,9 @@ TEMPO_EXPIRACAO_MIN = int(st.secrets.get("TEMPO_EXPIRACAO_MIN", 60))
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # ======================
-# EDGE FUNCTIONS (IMPORTANTE: domínio functions)
+# EDGE FUNCTIONS
 # ======================
-# Seu Project Ref: yrppduxsjerwhbgxpuxx
+# Project ref: yrppduxsjerwhbgxpuxx
 EDGE_BASE_URL = "https://yrppduxsjerwhbgxpuxx.functions.supabase.co"
 URL_HORARIOS = f"{EDGE_BASE_URL}/public-horarios-ocupados"
 URL_RESERVAR = f"{EDGE_BASE_URL}/public-criar-reserva"
@@ -57,9 +60,8 @@ URL_RESERVAR = f"{EDGE_BASE_URL}/public-criar-reserva"
 st.set_page_config(page_title="Agendamento de Unhas 💅", layout="centered")
 st.title("💅 Agendamento de Unhas")
 
-# Bloqueia uso sem tenant no link (SaaS: 1 link por profissional)
-if not PUBLIC_TENANT_ID:
-    st.error("Link inválido. Peça o link correto para a profissional (precisa ter ?t=...).")
+if not PUBLIC_TENANT_ID or not isinstance(PUBLIC_TENANT_ID, str):
+    st.error("Link inválido. Peça o link correto para a profissional (precisa ter ?t=TENANT_ID).")
     st.stop()
 
 # ======================
@@ -70,10 +72,8 @@ VALOR_SINAL_FIXO = 20.0
 PRECOS = {
     "Alongamento em Gel": 130.0,
     "Manutenção – Gel": 100.0,
-
     "Fibra de Vidro": 150.0,
     "Manutenção – Fibra": 110.0,
-
     "Pedicure": 50.0,
     "Banho de Gel": 100.0,
 }
@@ -120,12 +120,12 @@ def calcular_total_por_texto_servico(texto_servico: str) -> float:
 # HORÁRIOS POR DIA
 # ======================
 def horarios_do_dia(d: date) -> list[str]:
-    wd = d.weekday()  # 0=seg ... 5=sab ... 6=dom
+    wd = d.weekday()
     if wd in [0, 1, 2, 3, 4]:  # seg-sex
         return ["18:00"]
     if wd == 5:  # sábado
         return ["10:30", "14:00", "18:00"]
-    return []  # domingo
+    return []
 
 
 # ======================
@@ -163,8 +163,6 @@ if "admin_logado" not in st.session_state:
     st.session_state.admin_logado = False
 if "wa_link" not in st.session_state:
     st.session_state.wa_link = None
-if "ultimo_ag" not in st.session_state:
-    st.session_state.ultimo_ag = None
 if "reservando" not in st.session_state:
     st.session_state.reservando = False
 if "ultima_chave_reserva" not in st.session_state:
@@ -196,8 +194,7 @@ def agendamento_dt_local(data_str: str, horario_str: str) -> datetime | None:
     try:
         d = datetime.strptime(str(data_str), "%Y-%m-%d").date()
         hh, mm = str(horario_str).split(":")
-        dt = datetime(d.year, d.month, d.day, int(hh), int(mm), 0, tzinfo=LOCAL_TZ)
-        return dt
+        return datetime(d.year, d.month, d.day, int(hh), int(mm), 0, tzinfo=LOCAL_TZ)
     except Exception:
         return None
 
@@ -214,7 +211,7 @@ def horarios_ocupados_publico(tenant_id: str, data_escolhida: date) -> set[str]:
     try:
         resp = requests.post(
             URL_HORARIOS,
-            json={"tenant_id": tenant_id, "data": data_escolhida.isoformat()},
+            json={"tenant_id": str(tenant_id), "data": data_escolhida.isoformat()},
             timeout=12
         )
         if resp.status_code != 200:
@@ -261,42 +258,52 @@ def inserir_pre_agendamento_publico(
     servicos: list[str],
     valor_sinal: float
 ) -> dict | None:
-    try:
-        payload = {
-            "tenant_id": tenant_id,
-            "cliente": cliente.strip(),
-            "data": data_escolhida.isoformat(),
-            "horario": horario,
-            "servico": servicos_para_texto(servicos),
-            "valor": float(valor_sinal),
-        }
+    payload = {
+        "tenant_id": str(tenant_id),
+        "cliente": cliente.strip(),
+        "data": data_escolhida.isoformat(),
+        "horario": str(horario),
+        "servico": servicos_para_texto(servicos),
+        "valor": float(valor_sinal),
+    }
 
+    try:
         resp = requests.post(URL_RESERVAR, json=payload, timeout=12)
+
+        # Mostra motivo real se der erro
         if resp.status_code != 200:
+            st.error(f"Erro ao criar reserva (HTTP {resp.status_code}).")
+            st.code(resp.text)
             return None
 
-        return resp.json()
+        out = resp.json()
+        if isinstance(out, dict) and out.get("ok") is False:
+            st.error("Erro retornado pela função:")
+            st.code(out)
+            return None
 
-    except Exception:
+        return out
+
+    except Exception as e:
+        st.error("Falha de rede ao chamar a função.")
+        st.code(str(e))
         return None
 
 
 # ======================
-# FUNÇÕES SUPABASE (ADMIN) - sempre filtra tenant_id
+# SUPABASE (ADMIN) - por tenant
 # ======================
 def listar_agendamentos_admin(tenant_id: str):
     resp = (
         supabase
         .table("agendamentos")
         .select("id,cliente,data,horario,servico,status,valor,created_at")
-        .eq("tenant_id", tenant_id)
+        .eq("tenant_id", str(tenant_id))
         .order("data")
         .order("horario")
         .execute()
     )
-    dados = resp.data or []
-    df = pd.DataFrame(dados)
-
+    df = pd.DataFrame(resp.data or [])
     if df.empty:
         return pd.DataFrame(columns=["id", "Cliente", "Data", "Horário", "Serviço(s)", "Status", "Sinal", "Criado em"])
 
@@ -314,22 +321,18 @@ def listar_agendamentos_admin(tenant_id: str):
     df["Horário"] = df["Horário"].astype(str)
     df["Status"] = df["Status"].astype(str)
     df["Sinal"] = df["Sinal"].apply(lambda x: float(x) if x is not None else 0.0)
-
     return df
 
 
 def limpar_pendentes_expirados_admin(tenant_id: str):
     if TEMPO_EXPIRACAO_MIN <= 0:
         return
-
     cutoff_dt = agora_utc() - timedelta(minutes=TEMPO_EXPIRACAO_MIN)
-    cutoff_iso = cutoff_dt.isoformat()
-
     supabase.table("agendamentos") \
         .delete() \
-        .eq("tenant_id", tenant_id) \
+        .eq("tenant_id", str(tenant_id)) \
         .eq("status", "pendente") \
-        .lt("created_at", cutoff_iso) \
+        .lt("created_at", cutoff_dt.isoformat()) \
         .execute()
 
 
@@ -340,12 +343,11 @@ def atualizar_finalizados_admin(tenant_id: str):
             supabase
             .table("agendamentos")
             .select("id,data,horario,status")
-            .eq("tenant_id", tenant_id)
+            .eq("tenant_id", str(tenant_id))
             .eq("status", "pago")
             .lte("data", hoje)
             .execute()
         )
-
         rows = resp.data or []
         now = agora_local()
 
@@ -353,18 +355,17 @@ def atualizar_finalizados_admin(tenant_id: str):
             ag_id = r.get("id")
             dt = agendamento_dt_local(r.get("data"), r.get("horario"))
             if dt and dt < now:
-                supabase.table("agendamentos").update({"status": "finalizado"}).eq("tenant_id", tenant_id).eq("id", ag_id).execute()
-
+                supabase.table("agendamentos").update({"status": "finalizado"}).eq("tenant_id", str(tenant_id)).eq("id", ag_id).execute()
     except Exception:
         return
 
 
 def marcar_como_pago_admin(tenant_id: str, ag_id: int):
-    return supabase.table("agendamentos").update({"status": "pago"}).eq("tenant_id", tenant_id).eq("id", ag_id).execute()
+    return supabase.table("agendamentos").update({"status": "pago"}).eq("tenant_id", str(tenant_id)).eq("id", ag_id).execute()
 
 
 def excluir_agendamento_admin(tenant_id: str, ag_id: int):
-    return supabase.table("agendamentos").delete().eq("tenant_id", tenant_id).eq("id", ag_id).execute()
+    return supabase.table("agendamentos").delete().eq("tenant_id", str(tenant_id)).eq("id", ag_id).execute()
 
 
 # ======================
@@ -405,7 +406,7 @@ def montar_link_whatsapp(texto: str):
 aba_agendar, aba_catalogo, aba_admin = st.tabs(["💅 Agendamento", "📒 Catálogo", "🔐 Admin"])
 
 # ======================
-# ABA: AGENDAMENTO (PÚBLICO)
+# ABA: AGENDAMENTO
 # ======================
 with aba_agendar:
     st.subheader("Agende seu horário")
@@ -482,15 +483,13 @@ with aba_agendar:
             st.error("Preencha todos os campos e selecione pelo menos 1 serviço.")
         else:
             st.session_state.reservando = True
-
             chave = make_reserva_key(nome, data_atendimento, horario_escolhido, servicos_escolhidos)
 
             if st.session_state.ultima_chave_reserva == chave:
                 st.warning("Você já enviou esse agendamento. Se quiser mudar, fale com a profissional.")
                 st.session_state.reservando = False
             else:
-                # Para checagem "cliente no dia" e "horário ocupado", vamos depender das constraints do banco.
-                # Ainda assim, revalida horário via function:
+                # Revalida ocupação
                 if horario_escolhido in horarios_ocupados_publico(PUBLIC_TENANT_ID, data_atendimento):
                     st.warning("Esse horário já foi reservado. Escolha outro.")
                     st.session_state.reservando = False
@@ -504,9 +503,9 @@ with aba_agendar:
                         valor_sinal
                     )
 
-                    if not resp or not resp.get("ok"):
+                    if not resp:
                         st.session_state.reservando = False
-                        st.error("Não consegui criar a reserva. Tente novamente ou escolha outro horário.")
+                        st.error("Não consegui criar a reserva. Veja o erro acima e tente novamente.")
                     else:
                         mensagem = montar_mensagem_pagamento(
                             nome.strip(),
@@ -516,14 +515,6 @@ with aba_agendar:
                             valor_sinal
                         )
                         st.session_state.wa_link = montar_link_whatsapp(mensagem)
-                        st.session_state.ultimo_ag = {
-                            "cliente": nome.strip(),
-                            "data": data_atendimento.strftime("%d/%m/%Y"),
-                            "horario": horario_escolhido,
-                            "servicos": servicos_para_texto(servicos_escolhidos),
-                            "sinal": valor_sinal,
-                            "status": "pendente"
-                        }
                         st.session_state.ultima_chave_reserva = chave
                         st.session_state.reservando = False
                         st.success("Reserva criada como **PENDENTE**. Clique em **Abrir WhatsApp** para enviar a mensagem.")
@@ -554,7 +545,7 @@ with aba_catalogo:
             st.image(img_bytes, use_container_width=True)
 
 # ======================
-# ABA: ADMIN (por tenant)
+# ABA: ADMIN
 # ======================
 with aba_admin:
     st.subheader("Área administrativa 🔐")
@@ -643,8 +634,6 @@ with aba_admin:
                     marcar_como_pago_admin(PUBLIC_TENANT_ID, ag_id)
                     st.success("Marcado como PAGO ✅")
                     st.rerun()
-            else:
-                st.info("Nada para marcar como pago no filtro atual.")
 
             st.subheader("🗑️ Excluir")
             op_excluir = df_filtrado.apply(
@@ -659,27 +648,6 @@ with aba_admin:
                     excluir_agendamento_admin(PUBLIC_TENANT_ID, ag_id)
                     st.success("Excluído ✅")
                     st.rerun()
-            else:
-                st.info("Nada para excluir no filtro atual.")
-
-            st.subheader("⬇️ Baixar CSV (filtrado)")
-            if not df_filtrado.empty:
-                df_csv = df_filtrado.drop(columns=["Data_dt"]).copy()
-                df_csv["Preço do serviço"] = df_csv["Preço do serviço"].apply(lambda v: fmt_brl(float(v)))
-                df_csv["Sinal"] = df_csv["Sinal"].apply(lambda v: fmt_brl(float(v)))
-                st.download_button(
-                    "Baixar agendamentos_filtrado.csv",
-                    df_csv.drop(columns=["id"]).to_csv(index=False).encode("utf-8"),
-                    file_name="agendamentos_filtrado.csv",
-                    mime="text/csv"
-                )
-            else:
-                st.download_button(
-                    "Baixar agendamentos_filtrado.csv",
-                    pd.DataFrame().to_csv(index=False).encode("utf-8"),
-                    file_name="agendamentos_filtrado.csv",
-                    mime="text/csv"
-                )
 
     else:
         with st.form("login_admin"):
