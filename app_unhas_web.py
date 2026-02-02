@@ -268,12 +268,15 @@ def carregar_tenant_publico(tenant_id: str) -> dict | None:
     # ✅ via Edge Function tenant-public (recomendado)
     if URL_TENANT_PUBLIC:
         try:
-            resp = requests.post(
+            resp = resp = requests.post(
                 URL_TENANT_PUBLIC,
-                headers=fn_headers(),
-                json={"tenant_id": str(tenant_id)},
-                timeout=12
-            )
+             headers={
+             "Content-Type": "application/json",
+             "Authorization": f"Bearer {SUPABASE_ANON_KEY}",
+             "apikey": SUPABASE_ANON_KEY,
+               },
+               json={"tenant_id": str(tenant_id)},
+             timeout=12,)
             if resp.status_code != 200:
                 return None
             payload = resp.json()
