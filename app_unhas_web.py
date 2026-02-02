@@ -227,7 +227,7 @@ def carregar_tenant(tenant_id: str) -> dict | None:
         resp = (
             supabase
             .table("tenants")
-            .select("id,nome,ativo")
+            .select("id,nome,ativo,whatsapp_numero,pix_chave,pix_nome,pix_cidade")
             .eq("id", tenant_id)
             .limit(1)
             .execute()
@@ -240,7 +240,7 @@ def carregar_tenant(tenant_id: str) -> dict | None:
             resp = (
                 supabase
                 .table("tenants")
-                .select("id,nome")
+                .select("id,nome,whatsapp_numero,pix_chave,pix_nome,pix_cidade")
                 .eq("id", tenant_id)
                 .limit(1)
                 .execute()
@@ -269,6 +269,27 @@ if tenant.get("ativo") is False:
     st.stop()
 
 st.caption(f"Agenda de: **{tenant.get('nome', 'Profissional')}**")
+
+# ======================
+# CONFIG POR LOJA (WhatsApp / Pix)
+# ======================
+WHATSAPP_NUMERO_TENANT = (tenant.get("whatsapp_numero") or "").strip()
+PIX_CHAVE_TENANT = (tenant.get("pix_chave") or "").strip()
+PIX_NOME_TENANT = (tenant.get("pix_nome") or "Profissional").strip()
+PIX_CIDADE_TENANT = (tenant.get("pix_cidade") or "BRASIL").strip()
+
+# fallback opcional: se não preencher no banco, usa secrets (se existirem)
+if not WHATSAPP_NUMERO_TENANT:
+    WHATSAPP_NUMERO_TENANT = str(st.secrets.get("WHATSAPP_NUMERO", "")).strip()
+if not PIX_CHAVE_TENANT:
+    PIX_CHAVE_TENANT = str(st.secrets.get("PIX_CHAVE", "")).strip()
+if not PIX_NOME_TENANT:
+    PIX_NOME_TENANT = str(st.secrets.get("PIX_NOME", "Profissional")).strip()
+if not PIX_CIDADE_TENANT:
+    PIX_CIDADE_TENANT = str(st.secrets.get("PIX_CIDADE", "BRASIL")).strip()
+
+if not WHATSAPP_NUMERO_TENANT:
+    st.warning("WhatsApp desta loja não configurado. Configure em tenants.whatsapp_numero.")
 
 
 # ======================
@@ -466,9 +487,10 @@ def montar_mensagem_pagamento(nome, data_atendimento: date, horario, servicos: l
         f"💰 Total dos serviços: {fmt_brl(total)}\n"
         f"✅ Sinal para confirmar: {fmt_brl(valor_sinal)}\n\n"
         "Pix para pagamento do sinal:\n"
-        f"🔑 Chave Pix: {PIX_CHAVE}\n"
-        f"👤 Nome: {PIX_NOME}\n"
-        f"🏙️ Cidade: {PIX_CIDADE}\n\n"
+        f"🔑 Chave Pix: {PIX_CHAVE_TENANT}\n"
+        f"👤 Nome: {PIX_NOME_TENANT}\n"
+        f"🏙️ Cidade: {PIX_CIDADE_TENANT}\n\n"
+
         "📌 Assim que pagar, me envie o comprovante aqui para eu confirmar como PAGO. 🙏"
     )
     return msg
@@ -476,7 +498,8 @@ def montar_mensagem_pagamento(nome, data_atendimento: date, horario, servicos: l
 
 def montar_link_whatsapp(texto: str):
     text_encoded = urllib.parse.quote(texto, safe="")
-    return f"https://wa.me/{WHATSAPP_NUMERO}?text={text_encoded}"
+    return f"https://wa.me/{WHATSAPP_NUMERO_TENANT}?text={text_encoded}"
+
 
 
 # ======================
@@ -554,9 +577,10 @@ with aba_agendar:
         if st.session_state.wa_link:
             st.link_button("📲 Abrir WhatsApp", st.session_state.wa_link, use_container_width=True)
 
-    if PIX_CHAVE and st.session_state.wa_link:
+    if PIX_CHAVE_TENANT and st.session_state.wa_link:
         if st.button("🔑 Ver chave Pix", use_container_width=True):
-            st.toast(f"Chave Pix: {PIX_CHAVE}", icon="🔑")
+            st.toast(f"Chave Pix: {PIX_CHAVE_TENANT}", icon="🔑")
+
 
     if reservar_click:
         if not nome or not horario_escolhido or not servicos_escolhidos:
