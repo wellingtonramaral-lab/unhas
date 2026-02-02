@@ -38,8 +38,6 @@ SUPABASE_SERVICE_ROLE_KEY = st.secrets.get("SUPABASE_SERVICE_ROLE_KEY", "")
 # Edge Functions do seu projeto
 URL_RESERVAR = st.secrets.get("URL_RESERVAR", "")
 URL_HORARIOS = st.secrets.get("URL_HORARIOS", "")
-
-# ✅ Edge Function recomendada para buscar dados públicos do tenant
 URL_TENANT_PUBLIC = st.secrets.get("URL_TENANT_PUBLIC", "")
 
 TEMPO_EXPIRACAO_MIN = int(st.secrets.get("TEMPO_EXPIRACAO_MIN", 60))
@@ -64,7 +62,6 @@ def sb_anon():
 def sb_user(access_token: str):
     """
     ✅ FIX: compatível com a lib supabase instalada no Streamlit.
-    Em vez de options headers, usa postgrest.auth(token).
     """
     sb = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
     sb.postgrest.auth(access_token)
@@ -111,7 +108,6 @@ def parse_date_iso(d) -> date | None:
         return None
 
 def is_tenant_pago(tenant: dict) -> bool:
-    # sem free: pago se paid_until >= hoje
     hoje = date.today()
     paid_until = parse_date_iso(tenant.get("paid_until"))
     if not paid_until:
@@ -207,7 +203,15 @@ def pdf_para_imagens_com_fundo_branco(caminho_pdf: str, zoom: float = 2.0):
 # EDGE FUNCTIONS HELPERS
 # ============================================================
 def fn_headers():
-    return {"Content-Type": "application/json"}
+    """
+    ✅ Importante: Supabase Edge Functions exigem apikey/Authorization.
+    Isso remove o erro 401 Missing authorization header.
+    """
+    return {
+        "Content-Type": "application/json",
+        "apikey": SUPABASE_ANON_KEY,
+        "Authorization": f"Bearer {SUPABASE_ANON_KEY}",
+    }
 
 
 # ============================================================
@@ -250,9 +254,6 @@ def auth_logout():
     st.rerun()
 
 def get_auth_user(access_token: str):
-    """
-    ✅ FIX: em algumas versões precisa passar o token explicitamente
-    """
     sb = sb_user(access_token)
     try:
         out = sb.auth.get_user(access_token)
@@ -262,21 +263,18 @@ def get_auth_user(access_token: str):
 
 
 # ============================================================
-# TENANT LOAD
+# TENANT LOAD (público / admin)
 # ============================================================
 def carregar_tenant_publico(tenant_id: str) -> dict | None:
-    # ✅ via Edge Function tenant-public (recomendado)
+    # ✅ via Edge Function tenant-public
     if URL_TENANT_PUBLIC:
         try:
-            resp = resp = requests.post(
+            resp = requests.post(
                 URL_TENANT_PUBLIC,
-             headers={
-             "Content-Type": "application/json",
-             "Authorization": f"Bearer {SUPABASE_ANON_KEY}",
-             "apikey": SUPABASE_ANON_KEY,
-               },
-               json={"tenant_id": str(tenant_id)},
-             timeout=12,)
+                headers=fn_headers(),
+                json={"tenant_id": str(tenant_id)},
+                timeout=12
+            )
             if resp.status_code != 200:
                 return None
             payload = resp.json()
@@ -314,7 +312,7 @@ def carregar_tenant_admin(access_token: str) -> dict | None:
     try:
         resp = (
             sb.table("tenants")
-            .select("id,nome,ativo,paid_until,billing_status,whatsapp_numero,pix_chave,pix_nome,pix_nome,pix_cidade,whatsapp")
+            .select("id,nome,ativo,paid_until,billing_status,whatsapp_numero,pix_chave,pix_nome,pix_cidade,whatsapp")
             .limit(1)
             .execute()
         )
@@ -455,7 +453,7 @@ def listar_agendamentos_admin(access_token: str, tenant_id: str):
     return df
 
 
-def marcar_como_pago_admin(access_token: str, tenant_id: int | str, ag_id: int):
+def marcar_como_pago_admin(access_token: str, tenant_id: str, ag_id: int):
     sb = sb_user(access_token)
     return (
         sb.table("agendamentos")
@@ -466,7 +464,7 @@ def marcar_como_pago_admin(access_token: str, tenant_id: int | str, ag_id: int):
     )
 
 
-def excluir_agendamento_admin(access_token: str, tenant_id: int | str, ag_id: int):
+def excluir_agendamento_admin(access_token: str, tenant_id: str, ag_id: int):
     sb = sb_user(access_token)
     return (
         sb.table("agendamentos")
@@ -502,7 +500,7 @@ def atualizar_finalizados_admin(access_token: str, tenant_id: str):
 
 
 # ============================================================
-# WHATSAPP (CLIENTE E SUPORTE)
+# WHATSAPP
 # ============================================================
 def montar_link_whatsapp(whatsapp_numero: str, texto: str):
     text_encoded = urllib.parse.quote(texto, safe="")
@@ -514,6 +512,7 @@ def montar_mensagem_pagamento_cliente(
 ):
     servs = normalizar_servicos(servicos)
     total = calcular_total_servicos(servs)
+
     lista = "\n".join([f"• {s} ({fmt_brl(PRECOS.get(s, 0.0))})" for s in servs]) if servs else "-"
 
     msg = (
@@ -544,7 +543,6 @@ def tela_publica():
         st.info("Se você é a profissional, acesse o link sem ?t= para entrar no painel.")
         st.stop()
 
-    # Bloqueio por mensalidade (sem free) + bloqueio manual opcional
     if (tenant.get("ativo") is False) or (not is_tenant_pago(tenant)):
         st.warning("Agenda indisponível no momento 😕")
         st.info("A profissional está com a agenda temporariamente fechada.")
@@ -747,14 +745,13 @@ def tela_admin():
     tenant = carregar_tenant_admin(access_token)
     if not tenant:
         st.warning("Você ainda não tem um tenant (loja) criado para esse usuário.")
-        st.info("Pelo seu SQL: tenants.owner_user_id é único. Crie o tenant do usuário no Supabase (SQL/Table Editor) e pronto.")
+        st.info("Crie 1 registro na tabela tenants para esse usuário (owner_user_id = auth.users.id).")
         if st.button("Sair"):
             auth_logout()
         st.stop()
 
     tenant_id = tenant["id"]
 
-    # Bloqueio SaaS: sem free
     if (tenant.get("ativo") is False) or (not is_tenant_pago(tenant)):
         st.error("🔒 Assinatura mensal pendente")
 
