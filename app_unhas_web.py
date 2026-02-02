@@ -765,35 +765,7 @@ def tela_publica():
 def tela_admin():
     st.subheader("Área da Profissional 🔐")
 
-    st.divider()
-    st.subheader("👩‍💼 Meu perfil")
-
-    profile = carregar_profile(access_token)
-
-    if not profile:
-    st.error("Não foi possível carregar seu perfil.")
-    else:
-    nome = st.text_input("Nome da profissional", value=profile.get("nome") or "")
-    whatsapp = st.text_input("WhatsApp (somente números)", value=profile.get("whatsapp") or "")
-    pix_chave = st.text_input("Chave Pix", value=profile.get("pix_chave") or "")
-    pix_nome = st.text_input("Nome do Pix", value=profile.get("pix_nome") or "")
-    pix_cidade = st.text_input("Cidade do Pix", value=profile.get("pix_cidade") or "")
-
-    if st.button("💾 Salvar dados do perfil"):
-        salvar_profile(
-            access_token,
-            {
-                "nome": nome.strip(),
-                "whatsapp": whatsapp.strip(),
-                "pix_chave": pix_chave.strip(),
-                "pix_nome": pix_nome.strip(),
-                "pix_cidade": pix_cidade.strip(),
-            }
-        )
-        st.success("Perfil atualizado com sucesso!")
-        st.rerun()
-
-
+    # 1) Se não está logado, mostra login/cadastro e para
     if not st.session_state.access_token:
         tab1, tab2 = st.tabs(["Entrar", "Criar conta"])
 
@@ -821,37 +793,78 @@ def tela_admin():
                     st.code(str(e))
 
         st.stop()
-    
 
+    # 2) Já está logado
     access_token = st.session_state.access_token
+
     user = get_auth_user(access_token)
     if not user:
         st.warning("Sessão expirada. Faça login novamente.")
         auth_logout()
         st.stop()
 
+    st.divider()
+
+    # 3) Perfil (profiles)
+    st.subheader("👩‍💼 Meu perfil")
+    profile = carregar_profile(access_token)
+
+    if not profile:
+        st.error("Não foi possível carregar seu perfil.")
+    else:
+        nome = st.text_input("Nome da profissional", value=profile.get("nome") or "")
+        whatsapp = st.text_input("WhatsApp (somente números)", value=profile.get("whatsapp") or "")
+        pix_chave = st.text_input("Chave Pix", value=profile.get("pix_chave") or "")
+        pix_nome = st.text_input("Nome do Pix", value=profile.get("pix_nome") or "")
+        pix_cidade = st.text_input("Cidade do Pix", value=profile.get("pix_cidade") or "")
+
+        if st.button("💾 Salvar dados do perfil"):
+            salvar_profile(
+                access_token,
+                {
+                    "nome": nome.strip(),
+                    "whatsapp": whatsapp.strip(),
+                    "pix_chave": pix_chave.strip(),
+                    "pix_nome": pix_nome.strip(),
+                    "pix_cidade": pix_cidade.strip(),
+                },
+            )
+            st.success("Perfil atualizado com sucesso!")
+            st.rerun()
+
+    st.divider()
+
+    # 4) Tenant
     tenant = carregar_tenant_admin(access_token)
     if not tenant:
         st.warning("Você ainda não tem um tenant (loja) criado para esse usuário.")
         st.info("Tentando criar automaticamente...")
 
         out = criar_tenant_se_nao_existir(access_token)
-
         if not out or (isinstance(out, dict) and out.get("ok") is False):
             st.error("Falhou ao criar tenant automaticamente.")
             st.info("Abra Supabase → Edge Functions → create-tenant → Invocations/Logs e veja o erro.")
+            st.code(out)
             st.stop()
 
         st.success("Tenant criado! Recarregando...")
         st.rerun()
 
-    # Recarrega (ou usa o tenant existente)
+    # Recarrega tenant
     tenant = carregar_tenant_admin(access_token)
     if not tenant:
         st.error("Não consegui carregar o tenant deste usuário.")
         st.stop()
 
     tenant_id = str(tenant.get("id"))
+    st.success(f"Acesso liberado ✅ • Loja: **{tenant.get('nome','Minha loja')}**")
+
+    # Link público do cliente
+    base = PUBLIC_APP_BASE_URL or "https://SEUAPP.streamlit.app"
+    st.caption("Seu link para clientes:")
+    st.code(f"{base}/?t={tenant_id}")
+
+    # Aqui continua seu painel (agendamentos etc.)...
 
     if (tenant.get("ativo") is False) or (not is_tenant_pago(tenant)):
         st.error("🔒 Assinatura mensal pendente")
