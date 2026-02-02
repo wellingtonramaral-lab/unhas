@@ -39,30 +39,28 @@ PIX_CHAVE = st.secrets.get("PIX_CHAVE", "")
 PIX_NOME = st.secrets.get("PIX_NOME", "Profissional")
 PIX_CIDADE = st.secrets.get("PIX_CIDADE", "BRASIL")
 
-# 60 minutos por padrão
 TEMPO_EXPIRACAO_MIN = int(st.secrets.get("TEMPO_EXPIRACAO_MIN", 60))
 
-# (Opcional) se sua function exigir Authorization, descomente e use o ANON_KEY
+# Opcional: se Edge Function exigir Authorization
 SUPABASE_ANON_KEY = st.secrets.get("SUPABASE_ANON_KEY", "")
 
 # ======================
-# SUPABASE CLIENT (ADMIN)
+# SUPABASE CLIENT (ADMIN / leitura tenants)
 # ======================
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # ======================
 # EDGE FUNCTIONS (URLs reais do seu Supabase)
 # ======================
-# public-criar-reserva -> /functions/v1/super-api
+# Reserva:
 URL_RESERVAR = "https://yrppduxsjerwhbgxpuxx.supabase.co/functions/v1/super-api"
-
-# public-horarios-ocupados -> /functions/v1/hyper-action
+# Horários:
 URL_HORARIOS = "https://yrppduxsjerwhbgxpuxx.supabase.co/functions/v1/hyper-action"
 
-# Headers (use Authorization só se sua function pedir)
+
 def fn_headers():
     h = {"Content-Type": "application/json"}
-    # Se começar a dar 401/403, ative Authorization:
+    # se começar a dar 401/403, ative o bearer (precisa ANON_KEY nos secrets)
     if SUPABASE_ANON_KEY:
         h["Authorization"] = f"Bearer {SUPABASE_ANON_KEY}"
     return h
@@ -74,9 +72,6 @@ def fn_headers():
 st.set_page_config(page_title="Agendamento de Unhas 💅", layout="centered")
 st.title("💅 Agendamento de Unhas")
 
-if not PUBLIC_TENANT_ID or not isinstance(PUBLIC_TENANT_ID, str):
-    st.error("Link inválido. Peça o link correto para a profissional (precisa ter ?t=TENANT_ID).")
-    st.stop()
 
 # ======================
 # PREÇOS / SINAL FIXO
@@ -134,12 +129,12 @@ def calcular_total_por_texto_servico(texto_servico: str) -> float:
 # HORÁRIOS POR DIA
 # ======================
 def horarios_do_dia(d: date) -> list[str]:
-    wd = d.weekday()  # 0=seg ... 5=sab ... 6=dom
-    if wd in [0, 1, 2, 3, 4]:  # seg-sex
+    wd = d.weekday()
+    if wd in [0, 1, 2, 3, 4]:
         return ["18:00"]
-    if wd == 5:  # sábado
+    if wd == 5:
         return ["10:30", "14:00", "18:00"]
-    return []  # domingo
+    return []
 
 
 # ======================
@@ -175,13 +170,10 @@ def pdf_para_imagens_com_fundo_branco(caminho_pdf: str, zoom: float = 2.0):
 # ======================
 if "admin_logado" not in st.session_state:
     st.session_state.admin_logado = False
-
 if "wa_link" not in st.session_state:
     st.session_state.wa_link = None
-
 if "reservando" not in st.session_state:
     st.session_state.reservando = False
-
 if "ultima_chave_reserva" not in st.session_state:
     st.session_state.ultima_chave_reserva = None
 
@@ -222,6 +214,64 @@ def make_reserva_key(nome: str, data_at: date, horario: str, servicos: list[str]
 
 
 # ======================
+# VALIDAR TENANT (bloqueia UUID inventado)
+# ======================
+@st.cache_data(ttl=60, show_spinner=False)
+def carregar_tenant(tenant_id: str) -> dict | None:
+    """
+    Busca tenant no banco.
+    Se existir coluna 'ativo', usa pra bloquear.
+    """
+    try:
+        # tenta pegar id,nome,ativo (se ativo não existir, erro -> tentamos sem)
+        resp = (
+            supabase
+            .table("tenants")
+            .select("id,nome,ativo")
+            .eq("id", tenant_id)
+            .limit(1)
+            .execute()
+        )
+        if resp.data:
+            return resp.data[0]
+        return None
+    except Exception:
+        try:
+            resp = (
+                supabase
+                .table("tenants")
+                .select("id,nome")
+                .eq("id", tenant_id)
+                .limit(1)
+                .execute()
+            )
+            if resp.data:
+                t = resp.data[0]
+                t["ativo"] = True
+                return t
+            return None
+        except Exception:
+            return None
+
+
+if not PUBLIC_TENANT_ID or not isinstance(PUBLIC_TENANT_ID, str):
+    st.error("Link inválido. Solicite o link correto para a profissional.")
+    st.stop()
+
+tenant = carregar_tenant(PUBLIC_TENANT_ID)
+
+if not tenant:
+    st.error("Este link não é válido ou o cadastro não existe.")
+    st.stop()
+
+if tenant.get("ativo") is False:
+    st.error("Este cadastro está inativo. Fale com o suporte.")
+    st.stop()
+
+st.caption(f"Agenda de: **{tenant.get('nome', 'Profissional')}**")
+
+
+# ======================
 # EDGE FUNCTIONS (PÚBLICO)
 # ======================
 def horarios_ocupados_publico(tenant_id: str, data_escolhida: date) -> set[str]:
@@ -232,9 +282,7 @@ def horarios_ocupados_publico(tenant_id: str, data_escolhida: date) -> set[str]:
             json={"tenant_id": str(tenant_id), "data": data_escolhida.isoformat()},
             timeout=12
         )
-
         if resp.status_code != 200:
-            # debug opcional
             st.warning(f"Falha ao buscar horários (HTTP {resp.status_code}).")
             st.code(resp.text)
             return set()
@@ -319,7 +367,7 @@ def inserir_pre_agendamento_publico(
 
 
 # ======================
-# SUPABASE (ADMIN) - sempre filtra tenant_id
+# SUPABASE (ADMIN) - por tenant
 # ======================
 def listar_agendamentos_admin(tenant_id: str):
     resp = (
@@ -436,8 +484,9 @@ def montar_link_whatsapp(texto: str):
 # ======================
 aba_agendar, aba_catalogo, aba_admin = st.tabs(["💅 Agendamento", "📒 Catálogo", "🔐 Admin"])
 
+
 # ======================
-# ABA: AGENDAMENTO (PÚBLICO)
+# ABA: AGENDAMENTO
 # ======================
 with aba_agendar:
     st.subheader("Agende seu horário")
@@ -551,6 +600,7 @@ with aba_agendar:
                         st.success("Reserva criada como **PENDENTE**. Clique em **Abrir WhatsApp** para enviar a mensagem.")
                         st.rerun()
 
+
 # ======================
 # ABA: CATÁLOGO
 # ======================
@@ -574,6 +624,7 @@ with aba_catalogo:
         for i, img_bytes in enumerate(paginas, start=1):
             st.markdown(f"**Página {i}**")
             st.image(img_bytes, use_container_width=True)
+
 
 # ======================
 # ABA: ADMIN
@@ -679,25 +730,6 @@ with aba_admin:
                     excluir_agendamento_admin(PUBLIC_TENANT_ID, ag_id)
                     st.success("Excluído ✅")
                     st.rerun()
-
-            st.subheader("⬇️ Baixar CSV (filtrado)")
-            if not df_filtrado.empty:
-                df_csv = df_filtrado.drop(columns=["Data_dt"]).copy()
-                df_csv["Preço do serviço"] = df_csv["Preço do serviço"].apply(lambda v: fmt_brl(float(v)))
-                df_csv["Sinal"] = df_csv["Sinal"].apply(lambda v: fmt_brl(float(v)))
-                st.download_button(
-                    "Baixar agendamentos_filtrado.csv",
-                    df_csv.drop(columns=["id"]).to_csv(index=False).encode("utf-8"),
-                    file_name="agendamentos_filtrado.csv",
-                    mime="text/csv"
-                )
-            else:
-                st.download_button(
-                    "Baixar agendamentos_filtrado.csv",
-                    pd.DataFrame().to_csv(index=False).encode("utf-8"),
-                    file_name="agendamentos_filtrado.csv",
-                    mime="text/csv"
-                )
 
     else:
         with st.form("login_admin"):
