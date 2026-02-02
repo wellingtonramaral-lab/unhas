@@ -35,8 +35,9 @@ SUPABASE_ANON_KEY = st.secrets["SUPABASE_ANON_KEY"]
 # ⚠️ fallback temporário (evite em SaaS). Melhor: tenant-public (Edge Function).
 SUPABASE_SERVICE_ROLE_KEY = st.secrets.get("SUPABASE_SERVICE_ROLE_KEY", "")
 
-URL_RESERVAR = st.secrets.get("URL_RESERVAR")
-URL_HORARIOS = st.secrets.get("URL_HORARIOS")
+# Edge Functions do seu projeto
+URL_RESERVAR = st.secrets.get("URL_RESERVAR", "")
+URL_HORARIOS = st.secrets.get("URL_HORARIOS", "")
 
 # ✅ Edge Function recomendada para buscar dados públicos do tenant
 URL_TENANT_PUBLIC = st.secrets.get("URL_TENANT_PUBLIC", "")
@@ -61,11 +62,13 @@ def sb_anon():
     return create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
 
 def sb_user(access_token: str):
-    return create_client(
-        SUPABASE_URL,
-        SUPABASE_ANON_KEY,
-        options={"global": {"headers": {"Authorization": f"Bearer {access_token}"}}}
-    )
+    """
+    ✅ FIX: compatível com a lib supabase instalada no Streamlit.
+    Em vez de options headers, usa postgrest.auth(token).
+    """
+    sb = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
+    sb.postgrest.auth(access_token)
+    return sb
 
 def sb_service():
     if not SUPABASE_SERVICE_ROLE_KEY:
@@ -108,6 +111,7 @@ def parse_date_iso(d) -> date | None:
         return None
 
 def is_tenant_pago(tenant: dict) -> bool:
+    # sem free: pago se paid_until >= hoje
     hoje = date.today()
     paid_until = parse_date_iso(tenant.get("paid_until"))
     if not paid_until:
@@ -246,9 +250,12 @@ def auth_logout():
     st.rerun()
 
 def get_auth_user(access_token: str):
+    """
+    ✅ FIX: em algumas versões precisa passar o token explicitamente
+    """
     sb = sb_user(access_token)
     try:
-        out = sb.auth.get_user()
+        out = sb.auth.get_user(access_token)
         return out.user if out else None
     except Exception:
         return None
@@ -305,7 +312,7 @@ def carregar_tenant_admin(access_token: str) -> dict | None:
     try:
         resp = (
             sb.table("tenants")
-            .select("id,nome,ativo,paid_until,billing_status,whatsapp_numero,pix_chave,pix_nome,pix_cidade,whatsapp")
+            .select("id,nome,ativo,paid_until,billing_status,whatsapp_numero,pix_chave,pix_nome,pix_nome,pix_cidade,whatsapp")
             .limit(1)
             .execute()
         )
@@ -446,7 +453,7 @@ def listar_agendamentos_admin(access_token: str, tenant_id: str):
     return df
 
 
-def marcar_como_pago_admin(access_token: str, tenant_id: str, ag_id: int):
+def marcar_como_pago_admin(access_token: str, tenant_id: int | str, ag_id: int):
     sb = sb_user(access_token)
     return (
         sb.table("agendamentos")
@@ -457,7 +464,7 @@ def marcar_como_pago_admin(access_token: str, tenant_id: str, ag_id: int):
     )
 
 
-def excluir_agendamento_admin(access_token: str, tenant_id: str, ag_id: int):
+def excluir_agendamento_admin(access_token: str, tenant_id: int | str, ag_id: int):
     sb = sb_user(access_token)
     return (
         sb.table("agendamentos")
@@ -493,15 +500,18 @@ def atualizar_finalizados_admin(access_token: str, tenant_id: str):
 
 
 # ============================================================
-# WHATSAPP (CLIENTE)
+# WHATSAPP (CLIENTE E SUPORTE)
 # ============================================================
-def montar_mensagem_pagamento(
+def montar_link_whatsapp(whatsapp_numero: str, texto: str):
+    text_encoded = urllib.parse.quote(texto, safe="")
+    return f"https://wa.me/{whatsapp_numero}?text={text_encoded}"
+
+def montar_mensagem_pagamento_cliente(
     nome, data_atendimento: date, horario, servicos: list[str], valor_sinal: float,
     pix_chave: str, pix_nome: str, pix_cidade: str
 ):
     servs = normalizar_servicos(servicos)
     total = calcular_total_servicos(servs)
-
     lista = "\n".join([f"• {s} ({fmt_brl(PRECOS.get(s, 0.0))})" for s in servs]) if servs else "-"
 
     msg = (
@@ -522,11 +532,6 @@ def montar_mensagem_pagamento(
     return msg
 
 
-def montar_link_whatsapp(whatsapp_numero: str, texto: str):
-    text_encoded = urllib.parse.quote(texto, safe="")
-    return f"https://wa.me/{whatsapp_numero}?text={text_encoded}"
-
-
 # ============================================================
 # UI: MODO PÚBLICO
 # ============================================================
@@ -537,8 +542,8 @@ def tela_publica():
         st.info("Se você é a profissional, acesse o link sem ?t= para entrar no painel.")
         st.stop()
 
-    # Bloqueio por mensalidade (sem free)
-    if not is_tenant_pago(tenant) or (tenant.get("ativo") is False):
+    # Bloqueio por mensalidade (sem free) + bloqueio manual opcional
+    if (tenant.get("ativo") is False) or (not is_tenant_pago(tenant)):
         st.warning("Agenda indisponível no momento 😕")
         st.info("A profissional está com a agenda temporariamente fechada.")
         st.stop()
@@ -659,7 +664,7 @@ def tela_publica():
                             st.session_state.reservando = False
                             st.error("Não consegui criar a reserva. Veja o erro acima e tente novamente.")
                         else:
-                            mensagem = montar_mensagem_pagamento(
+                            mensagem = montar_mensagem_pagamento_cliente(
                                 nome.strip(),
                                 data_atendimento,
                                 horario_escolhido,
