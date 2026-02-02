@@ -8,8 +8,6 @@ from PIL import Image
 import io
 from supabase import create_client
 
-st.write("DEBUG access_token:")
-st.code(st.session_state.access_token)
 
 # ============================================================
 # TIMEZONE Brasil (UTC-3)
@@ -41,12 +39,6 @@ SUPABASE_SERVICE_ROLE_KEY = st.secrets.get("SUPABASE_SERVICE_ROLE_KEY", "")
 URL_RESERVAR = st.secrets.get("URL_RESERVAR", "")
 URL_HORARIOS = st.secrets.get("URL_HORARIOS", "")
 URL_TENANT_PUBLIC = st.secrets.get("URL_TENANT_PUBLIC", "")
-
-# ✅ Onboarding automático
-URL_CREATE_TENANT = st.secrets.get("URL_CREATE_TENANT", "")
-
-# ✅ Serviços por loja (tenant)
-URL_SERVICOS_PUBLIC = st.secrets.get("URL_SERVICOS_PUBLIC", "")
 
 TEMPO_EXPIRACAO_MIN = int(st.secrets.get("TEMPO_EXPIRACAO_MIN", 60))
 PUBLIC_APP_BASE_URL = st.secrets.get("PUBLIC_APP_BASE_URL", "").strip()
@@ -124,12 +116,11 @@ def is_tenant_pago(tenant: dict) -> bool:
 
 
 # ============================================================
-# PREÇOS / SINAL FIXO (FALLBACK)
+# PREÇOS / SINAL FIXO
 # ============================================================
 VALOR_SINAL_FIXO = 20.0
 
-# ⚠️ Fallback (caso você ainda não tenha a tabela servicos)
-PRECOS_FALLBACK = {
+PRECOS = {
     "Alongamento em Gel": 130.0,
     "Manutenção – Gel": 100.0,
     "Fibra de Vidro": 150.0,
@@ -158,26 +149,15 @@ def texto_para_lista_servicos(texto: str) -> list[str]:
     parts = [p.strip() for p in texto.split("+")]
     return [p for p in parts if p]
 
-def preco_do_servico(nome: str, precos_map: dict[str, float] | None) -> float:
-    if precos_map and nome in precos_map:
-        try:
-            return float(precos_map[nome])
-        except Exception:
-            return 0.0
-    try:
-        return float(PRECOS_FALLBACK.get(nome, 0.0))
-    except Exception:
-        return 0.0
-
-def calcular_total_servicos(servicos: list[str], precos_map: dict[str, float] | None = None) -> float:
+def calcular_total_servicos(servicos: list[str]) -> float:
     total = 0.0
     for s in normalizar_servicos(servicos):
-        total += preco_do_servico(s, precos_map)
+        total += float(PRECOS.get(s, 0.0))
     return float(total)
 
-def calcular_total_por_texto_servico(texto_servico: str, precos_map: dict[str, float] | None = None) -> float:
+def calcular_total_por_texto_servico(texto_servico: str) -> float:
     servs = texto_para_lista_servicos(texto_servico)
-    return calcular_total_servicos(servs, precos_map=precos_map)
+    return calcular_total_servicos(servs)
 
 
 # ============================================================
@@ -232,92 +212,6 @@ def fn_headers():
         "apikey": SUPABASE_ANON_KEY,
         "Authorization": f"Bearer {SUPABASE_ANON_KEY}",
     }
-
-def fn_headers_user(access_token: str):
-    """
-    ✅ Para funções que precisam do usuário logado (RLS / auth).
-    """
-    return {
-        "Content-Type": "application/json",
-        "apikey": SUPABASE_ANON_KEY,
-        "Authorization": f"Bearer {access_token}",
-    }
-
-def criar_tenant_se_nao_existir(access_token: str) -> dict | None:
-    """
-    ✅ Chama a Edge Function create-tenant.
-    Ela deve criar o tenant do owner_user_id do token, se não existir.
-    Retorno esperado: { ok: true, tenant: {...} }
-    """
-    if not URL_CREATE_TENANT:
-        return None
-    try:
-        resp = requests.post(
-            URL_CREATE_TENANT,
-            headers=fn_headers_user(access_token),
-            json={},  # a function deve usar o user do JWT
-            timeout=12
-        )
-        if resp.status_code != 200:
-            return None
-        payload = resp.json()
-        return payload if isinstance(payload, dict) else None
-    except Exception:
-        return None
-
-def carregar_servicos_publico(tenant_id: str) -> list[dict]:
-    """
-    ✅ Carrega serviços da loja (tenant) para o modo público.
-    Recomendado usar Edge Function (service role) pra evitar expor service key no app.
-    Retorno esperado: { ok:true, rows:[{nome,preco},...] }
-    """
-    if not URL_SERVICOS_PUBLIC:
-        return []
-    try:
-        resp = requests.post(
-            URL_SERVICOS_PUBLIC,
-            headers=fn_headers(),
-            json={"tenant_id": str(tenant_id)},
-            timeout=12
-        )
-        if resp.status_code != 200:
-            return []
-        payload = resp.json()
-        rows = payload.get("rows", []) if isinstance(payload, dict) else []
-        return rows if isinstance(rows, list) else []
-    except Exception:
-        return []
-
-def carregar_servicos_admin(access_token: str, tenant_id: str) -> list[dict]:
-    """
-    ✅ Carrega serviços da loja (tenant) no admin via tabela 'servicos'.
-    Requer RLS ok: owner só vê os seus.
-    """
-    try:
-        sb = sb_user(access_token)
-        resp = (
-            sb.table("servicos")
-            .select("id,nome,preco,ativo")
-            .eq("tenant_id", str(tenant_id))
-            .eq("ativo", True)
-            .order("nome")
-            .execute()
-        )
-        return resp.data or []
-    except Exception:
-        return []
-
-def servicos_para_precos_map(servicos_rows: list[dict]) -> dict[str, float]:
-    m: dict[str, float] = {}
-    for r in (servicos_rows or []):
-        nome = str(r.get("nome") or "").strip()
-        if not nome:
-            continue
-        try:
-            m[nome] = float(r.get("preco") or 0.0)
-        except Exception:
-            m[nome] = 0.0
-    return m
 
 
 # ============================================================
@@ -614,13 +508,12 @@ def montar_link_whatsapp(whatsapp_numero: str, texto: str):
 
 def montar_mensagem_pagamento_cliente(
     nome, data_atendimento: date, horario, servicos: list[str], valor_sinal: float,
-    pix_chave: str, pix_nome: str, pix_cidade: str,
-    precos_map: dict[str, float] | None = None
+    pix_chave: str, pix_nome: str, pix_cidade: str
 ):
     servs = normalizar_servicos(servicos)
-    total = calcular_total_servicos(servs, precos_map=precos_map)
+    total = calcular_total_servicos(servs)
 
-    lista = "\n".join([f"• {s} ({fmt_brl(preco_do_servico(s, precos_map))})" for s in servs]) if servs else "-"
+    lista = "\n".join([f"• {s} ({fmt_brl(PRECOS.get(s, 0.0))})" for s in servs]) if servs else "-"
 
     msg = (
         "Olá! Quero reservar meu horário. 💅\n\n"
@@ -665,11 +558,6 @@ def tela_publica():
     if not whatsapp_num:
         st.warning("WhatsApp desta loja não configurado.")
 
-    # ✅ Serviços por loja (se existir); senão usa fallback
-    servicos_rows = carregar_servicos_publico(PUBLIC_TENANT_ID)
-    precos_map = servicos_para_precos_map(servicos_rows)
-    opcoes_servicos = list(precos_map.keys()) if precos_map else list(PRECOS_FALLBACK.keys())
-
     aba_agendar, aba_catalogo = st.tabs(["💅 Agendamento", "📒 Catálogo"])
 
     with aba_agendar:
@@ -684,12 +572,12 @@ def tela_publica():
 
         servicos_escolhidos = st.multiselect(
             "Tipo de serviço (pode escolher mais de um)",
-            options=opcoes_servicos,
+            options=list(PRECOS.keys()),
             default=[]
         )
         servicos_escolhidos = normalizar_servicos(servicos_escolhidos)
 
-        total_servico = calcular_total_servicos(servicos_escolhidos, precos_map=precos_map if precos_map else None)
+        total_servico = calcular_total_servicos(servicos_escolhidos)
         valor_sinal = calcular_sinal(servicos_escolhidos)
 
         if servicos_escolhidos:
@@ -784,8 +672,7 @@ def tela_publica():
                                 valor_sinal,
                                 pix_chave=pix_chave,
                                 pix_nome=pix_nome,
-                                pix_cidade=pix_cidade,
-                                precos_map=precos_map if precos_map else None
+                                pix_cidade=pix_cidade
                             )
                             st.session_state.wa_link = montar_link_whatsapp(whatsapp_num, mensagem)
                             st.session_state.ultima_chave_reserva = chave
@@ -856,36 +743,14 @@ def tela_admin():
         st.stop()
 
     tenant = carregar_tenant_admin(access_token)
-
-    # ✅ cria tenant automaticamente no 1º login
     if not tenant:
-        if not URL_CREATE_TENANT:
-            st.error("Onboarding automático não configurado.")
-            st.info("Configure no secrets: URL_CREATE_TENANT (sua Edge Function create-tenant).")
-            if st.button("Sair"):
-                auth_logout()
-            st.stop()
-
-        with st.spinner("Criando sua loja automaticamente..."):
-            out = criar_tenant_se_nao_existir(access_token)
-
-        if not out or (isinstance(out, dict) and out.get("ok") is False):
-            st.error("Não consegui criar sua loja automaticamente.")
-            st.info("Verifique sua Edge Function create-tenant e logs no Supabase.")
-            if isinstance(out, dict):
-                st.code(out)
-            if st.button("Sair"):
-                auth_logout()
-            st.stop()
-
-        st.success("Loja criada! Entrando no painel...")
-        st.rerun()
+        st.warning("Você ainda não tem um tenant (loja) criado para esse usuário.")
+        st.info("Crie 1 registro na tabela tenants para esse usuário (owner_user_id = auth.users.id).")
+        if st.button("Sair"):
+            auth_logout()
+        st.stop()
 
     tenant_id = tenant["id"]
-
-    # ✅ carrega serviços do admin (para calcular totals no painel)
-    servicos_admin_rows = carregar_servicos_admin(access_token, tenant_id)
-    precos_map_admin = servicos_para_precos_map(servicos_admin_rows) if servicos_admin_rows else None
 
     if (tenant.get("ativo") is False) or (not is_tenant_pago(tenant)):
         st.error("🔒 Assinatura mensal pendente")
@@ -939,7 +804,7 @@ def tela_admin():
         return
 
     df_admin["Data_dt"] = pd.to_datetime(df_admin["Data"], errors="coerce")
-    df_admin["Preço do serviço"] = df_admin["Serviço(s)"].apply(lambda txt: calcular_total_por_texto_servico(txt, precos_map=precos_map_admin)).astype(float)
+    df_admin["Preço do serviço"] = df_admin["Serviço(s)"].apply(calcular_total_por_texto_servico).astype(float)
 
     colp1, colp2, colp3 = st.columns([1, 1, 1])
     with colp1:
