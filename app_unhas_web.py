@@ -264,7 +264,6 @@ def get_auth_user(access_token: str):
 # ============================================================
 # TENANT LOAD
 # ============================================================
-@st.cache_data(ttl=60, show_spinner=False)
 def carregar_tenant_publico(tenant_id: str) -> dict | None:
     # ✅ via Edge Function tenant-public (recomendado)
     if URL_TENANT_PUBLIC:
