@@ -763,6 +763,35 @@ def tela_publica():
 def tela_admin():
     st.subheader("Área da Profissional 🔐")
 
+    st.divider()
+    st.subheader("👩‍💼 Meu perfil")
+
+    profile = carregar_profile(access_token)
+
+    if not profile:
+    st.error("Não foi possível carregar seu perfil.")
+    else:
+    nome = st.text_input("Nome da profissional", value=profile.get("nome") or "")
+    whatsapp = st.text_input("WhatsApp (somente números)", value=profile.get("whatsapp") or "")
+    pix_chave = st.text_input("Chave Pix", value=profile.get("pix_chave") or "")
+    pix_nome = st.text_input("Nome do Pix", value=profile.get("pix_nome") or "")
+    pix_cidade = st.text_input("Cidade do Pix", value=profile.get("pix_cidade") or "")
+
+    if st.button("💾 Salvar dados do perfil"):
+        salvar_profile(
+            access_token,
+            {
+                "nome": nome.strip(),
+                "whatsapp": whatsapp.strip(),
+                "pix_chave": pix_chave.strip(),
+                "pix_nome": pix_nome.strip(),
+                "pix_cidade": pix_cidade.strip(),
+            }
+        )
+        st.success("Perfil atualizado com sucesso!")
+        st.rerun()
+
+
     if not st.session_state.access_token:
         tab1, tab2 = st.tabs(["Entrar", "Criar conta"])
 
@@ -790,6 +819,7 @@ def tela_admin():
                     st.code(str(e))
 
         st.stop()
+    
 
     access_token = st.session_state.access_token
     user = get_auth_user(access_token)
@@ -948,6 +978,29 @@ def tela_admin():
             excluir_agendamento_admin(access_token, tenant_id, ag_id)
             st.success("Excluído ✅")
             st.rerun()
+def carregar_profile(access_token: str) -> dict | None:
+    sb = sb_user(access_token)
+    try:
+        resp = (
+            sb.table("profiles")
+            .select("id,email,nome,whatsapp,pix_chave,pix_nome,pix_cidade")
+            .eq("id", sb.auth.get_user(access_token).user.id)
+            .single()
+            .execute()
+        )
+        return resp.data
+    except Exception:
+        return None
+
+
+def salvar_profile(access_token: str, dados: dict):
+    sb = sb_user(access_token)
+    return (
+        sb.table("profiles")
+        .update(dados)
+        .eq("id", sb.auth.get_user(access_token).user.id)
+        .execute()
+    )
 
 
 # ============================================================
