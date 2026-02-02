@@ -8,6 +8,8 @@ from PIL import Image
 import io
 from supabase import create_client
 
+st.write("DEBUG access_token:")
+st.code(st.session_state.access_token)
 
 # ============================================================
 # TIMEZONE Brasil (UTC-3)
