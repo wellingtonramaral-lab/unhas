@@ -312,18 +312,15 @@ def carregar_tenant_admin(access_token: str) -> dict | None:
     try:
         resp = (
             sb.table("tenants")
-            .select("id,nome,ativo,paid_until,billing_status,whatsapp_numero,pix_chave,pix_nome,pix_cidade,whatsapp")
-            .limit(1)
+            .select("id,nome,ativo,paid_until,billing_status,whatsapp_numero,pix_chave,pix_nome,pix_cidade,whatsapp,owner_user_id")
+            .eq("owner_user_id", sb.auth.get_user(access_token).user.id)
+            .maybe_single()
             .execute()
         )
-        if resp.data:
-            t = resp.data[0]
-            if "ativo" not in t:
-                t["ativo"] = True
-            return t
-        return None
+        return resp.data if resp and resp.data else None
     except Exception:
         return None
+
 
 
 # ============================================================
