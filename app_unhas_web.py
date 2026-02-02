@@ -604,7 +604,9 @@ def tela_publica():
         st.info("A profissional está com a agenda temporariamente fechada.")
         st.stop()
 
-    st.caption(f"Agenda de: **{tenant.get('nome', 'Profissional')}**")
+    nome_prof = tenant.get("nome") or "Profissional"
+    st.caption(f"Agenda de: **{nome_prof}**")
+
 
     whatsapp_num = (tenant.get("whatsapp_numero") or tenant.get("whatsapp") or "").strip()
     pix_chave = (tenant.get("pix_chave") or "").strip()
