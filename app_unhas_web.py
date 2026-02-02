@@ -40,6 +40,9 @@ URL_RESERVAR = st.secrets.get("URL_RESERVAR", "")
 URL_HORARIOS = st.secrets.get("URL_HORARIOS", "")
 URL_TENANT_PUBLIC = st.secrets.get("URL_TENANT_PUBLIC", "")
 
+# ✅ NOVO: Edge Function que cria tenant automaticamente no 1º login
+URL_CREATE_TENANT = st.secrets.get("URL_CREATE_TENANT", "")
+
 TEMPO_EXPIRACAO_MIN = int(st.secrets.get("TEMPO_EXPIRACAO_MIN", 60))
 PUBLIC_APP_BASE_URL = st.secrets.get("PUBLIC_APP_BASE_URL", "").strip()
 
@@ -212,6 +215,38 @@ def fn_headers():
         "apikey": SUPABASE_ANON_KEY,
         "Authorization": f"Bearer {SUPABASE_ANON_KEY}",
     }
+
+def fn_headers_user(access_token: str):
+    """
+    ✅ Para funções que precisam do usuário logado (RLS / auth).
+    """
+    return {
+        "Content-Type": "application/json",
+        "apikey": SUPABASE_ANON_KEY,
+        "Authorization": f"Bearer {access_token}",
+    }
+
+def criar_tenant_se_nao_existir(access_token: str) -> dict | None:
+    """
+    ✅ Chama a Edge Function create-tenant.
+    Ela deve criar o tenant do owner_user_id do token, se não existir.
+    Retorno esperado: { ok: true, tenant: {...} }
+    """
+    if not URL_CREATE_TENANT:
+        return None
+    try:
+        resp = requests.post(
+            URL_CREATE_TENANT,
+            headers=fn_headers_user(access_token),
+            json={},  # a function deve usar o user do JWT
+            timeout=12
+        )
+        if resp.status_code != 200:
+            return None
+        payload = resp.json()
+        return payload if isinstance(payload, dict) else None
+    except Exception:
+        return None
 
 
 # ============================================================
@@ -743,12 +778,31 @@ def tela_admin():
         st.stop()
 
     tenant = carregar_tenant_admin(access_token)
+
+    # ✅ NOVO: cria tenant automaticamente no 1º login
     if not tenant:
-        st.warning("Você ainda não tem um tenant (loja) criado para esse usuário.")
-        st.info("Crie 1 registro na tabela tenants para esse usuário (owner_user_id = auth.users.id).")
-        if st.button("Sair"):
-            auth_logout()
-        st.stop()
+        if not URL_CREATE_TENANT:
+            st.error("Onboarding automático não configurado.")
+            st.info("Configure no secrets: URL_CREATE_TENANT (sua Edge Function create-tenant).")
+            if st.button("Sair"):
+                auth_logout()
+            st.stop()
+
+        with st.spinner("Criando sua loja automaticamente..."):
+            out = criar_tenant_se_nao_existir(access_token)
+
+        # Se a function falhar, mostra erro decente (sem travar em silêncio)
+        if not out or (isinstance(out, dict) and out.get("ok") is False):
+            st.error("Não consegui criar sua loja automaticamente.")
+            st.info("Verifique sua Edge Function create-tenant e logs no Supabase.")
+            if isinstance(out, dict):
+                st.code(out)
+            if st.button("Sair"):
+                auth_logout()
+            st.stop()
+
+        st.success("Loja criada! Entrando no painel...")
+        st.rerun()
 
     tenant_id = tenant["id"]
 
