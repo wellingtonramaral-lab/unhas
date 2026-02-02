@@ -39,6 +39,8 @@ SUPABASE_SERVICE_ROLE_KEY = st.secrets.get("SUPABASE_SERVICE_ROLE_KEY", "")
 URL_RESERVAR = st.secrets.get("URL_RESERVAR", "")
 URL_HORARIOS = st.secrets.get("URL_HORARIOS", "")
 URL_TENANT_PUBLIC = st.secrets.get("URL_TENANT_PUBLIC", "")
+URL_CREATE_TENANT = st.secrets.get("URL_CREATE_TENANT", "")
+TRIAL_DIAS = int(st.secrets.get("TRIAL_DIAS", 7))
 
 TEMPO_EXPIRACAO_MIN = int(st.secrets.get("TEMPO_EXPIRACAO_MIN", 60))
 PUBLIC_APP_BASE_URL = st.secrets.get("PUBLIC_APP_BASE_URL", "").strip()
@@ -321,6 +323,63 @@ def carregar_tenant_admin(access_token: str) -> dict | None:
     except Exception:
         return None
 
+
+def criar_tenant_se_nao_existir(access_token: str) -> dict | None:
+    """
+    Cria um tenant para o usuário logado (caso ainda não exista).
+    Prioridade:
+      1) Edge Function (URL_CREATE_TENANT), se configurada
+      2) Insert direto na tabela 'tenants' usando o usuário autenticado (RLS deve permitir)
+    Retorna dict com {"ok": True, "tenant_id": "..."} quando der certo.
+    """
+    user = get_auth_user(access_token)
+    if not user:
+        return {"ok": False, "error": "user_not_found"}
+
+    # 1) via Edge Function (recomendado)
+    if URL_CREATE_TENANT:
+        try:
+            resp = requests.post(
+                URL_CREATE_TENANT,
+                headers=fn_headers(),
+                json={"user_id": str(user.id), "email": str(user.email or "")},
+                timeout=12
+            )
+            if resp.status_code != 200:
+                return {"ok": False, "error": f"edge_http_{resp.status_code}", "details": resp.text}
+            payload = resp.json()
+            if isinstance(payload, dict) and payload.get("ok"):
+                return payload
+            return {"ok": False, "error": "edge_payload_invalid", "details": payload}
+        except Exception as e:
+            return {"ok": False, "error": "edge_exception", "details": str(e)}
+
+    # 2) fallback: insert direto (evite em produção sem revisar RLS)
+    try:
+        sb = sb_user(access_token)
+        paid_until = (date.today() + timedelta(days=int(TRIAL_DIAS))).isoformat()
+
+        resp = (
+            sb.table("tenants")
+            .insert({
+                "owner_user_id": str(user.id),
+                "nome": "Minha loja",
+                "ativo": True,
+                "billing_status": "trial",
+                "paid_until": paid_until,
+            })
+            .select("id")
+            .single()
+            .execute()
+        )
+
+        tenant_id = None
+        if resp and isinstance(resp.data, dict):
+            tenant_id = resp.data.get("id")
+
+        return {"ok": True, "tenant_id": tenant_id}
+    except Exception as e:
+        return {"ok": False, "error": "insert_exception", "details": str(e)}
 
 
 # ============================================================
@@ -741,19 +800,26 @@ def tela_admin():
 
     tenant = carregar_tenant_admin(access_token)
     if not tenant:
-    st.warning("Você ainda não tem um tenant (loja) criado para esse usuário.")
-    st.info("Tentando criar automaticamente...")
+        st.warning("Você ainda não tem um tenant (loja) criado para esse usuário.")
+        st.info("Tentando criar automaticamente...")
 
-    out = criar_tenant_se_nao_existir(access_token)
+        out = criar_tenant_se_nao_existir(access_token)
 
-    if not out or (isinstance(out, dict) and out.get("ok") is False):
-        st.error("Falhou ao criar tenant automaticamente.")
-        st.info("Abra Supabase → Edge Functions → create-tenant → Invocations/Logs e veja o erro.")
+        if not out or (isinstance(out, dict) and out.get("ok") is False):
+            st.error("Falhou ao criar tenant automaticamente.")
+            st.info("Abra Supabase → Edge Functions → create-tenant → Invocations/Logs e veja o erro.")
+            st.stop()
+
+        st.success("Tenant criado! Recarregando...")
+        st.rerun()
+
+    # Recarrega (ou usa o tenant existente)
+    tenant = carregar_tenant_admin(access_token)
+    if not tenant:
+        st.error("Não consegui carregar o tenant deste usuário.")
         st.stop()
 
-    st.success("Tenant criado! Recarregando...")
-    st.rerun()
-
+    tenant_id = str(tenant.get("id"))
 
     if (tenant.get("ativo") is False) or (not is_tenant_pago(tenant)):
         st.error("🔒 Assinatura mensal pendente")
