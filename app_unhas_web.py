@@ -27,29 +27,31 @@ st.title("💅 Agendamento de Unhas")
 
 
 # ============================================================
-# SECRETS (mínimos)
+# SECRETS
 # ============================================================
 SUPABASE_URL = st.secrets["SUPABASE_URL"]
 SUPABASE_ANON_KEY = st.secrets["SUPABASE_ANON_KEY"]
 
-# ⚠️ Temporário (fallback) — EVITE em SaaS. Preferir Edge Function tenant-public.
+# ⚠️ fallback temporário (evite em SaaS). Melhor: tenant-public (Edge Function).
 SUPABASE_SERVICE_ROLE_KEY = st.secrets.get("SUPABASE_SERVICE_ROLE_KEY", "")
 
-# Edge Functions (as suas atuais)
-URL_RESERVAR = st.secrets.get(
-    "URL_RESERVAR",
-    "https://yrppduxsjerwhbgxpuxx.supabase.co/functions/v1/super-api"
-)
-URL_HORARIOS = st.secrets.get(
-    "URL_HORARIOS",
-    "https://yrppduxsjerwhbgxpuxx.supabase.co/functions/v1/hyper-action"
-)
+URL_RESERVAR = st.secrets.get("URL_RESERVAR")
+URL_HORARIOS = st.secrets.get("URL_HORARIOS")
 
-# ✅ RECOMENDADO: crie uma Edge Function para buscar dados públicos do tenant:
-# POST { tenant_id } -> retorna { ok: true, tenant: {...} }
+# ✅ Edge Function recomendada para buscar dados públicos do tenant
 URL_TENANT_PUBLIC = st.secrets.get("URL_TENANT_PUBLIC", "")
 
 TEMPO_EXPIRACAO_MIN = int(st.secrets.get("TEMPO_EXPIRACAO_MIN", 60))
+PUBLIC_APP_BASE_URL = st.secrets.get("PUBLIC_APP_BASE_URL", "").strip()
+
+# ============================================================
+# MENSALIDADE (PIX do seu SaaS)
+# ============================================================
+SAAS_PIX_CHAVE = st.secrets.get("SAAS_PIX_CHAVE", "").strip()
+SAAS_PIX_NOME = st.secrets.get("SAAS_PIX_NOME", "Suporte").strip()
+SAAS_PIX_CIDADE = st.secrets.get("SAAS_PIX_CIDADE", "BRASIL").strip()
+SAAS_MENSAL_VALOR = st.secrets.get("SAAS_MENSAL_VALOR", "R$ 39,90").strip()
+SAAS_SUPORTE_WHATSAPP = st.secrets.get("SAAS_SUPORTE_WHATSAPP", "").strip()
 
 
 # ============================================================
@@ -97,10 +99,24 @@ def agendamento_dt_local(data_str: str, horario_str: str) -> datetime | None:
     except Exception:
         return None
 
+def parse_date_iso(d) -> date | None:
+    if not d:
+        return None
+    try:
+        return date.fromisoformat(str(d))
+    except Exception:
+        return None
+
+def is_tenant_pago(tenant: dict) -> bool:
+    hoje = date.today()
+    paid_until = parse_date_iso(tenant.get("paid_until"))
+    if not paid_until:
+        return False
+    return paid_until >= hoje
+
 
 # ============================================================
 # PREÇOS / SINAL FIXO
-# (Próximo passo do SaaS: mover pra tabela "servicos" por tenant)
 # ============================================================
 VALOR_SINAL_FIXO = 20.0
 
@@ -191,21 +207,18 @@ def fn_headers():
 
 
 # ============================================================
-# MULTI-TENANT: DETECTAR MODO
-# - Público: tem ?t=tenant_id
-# - Admin: sem ?t= (login)
+# ROUTING: PUBLIC vs ADMIN
 # ============================================================
 query = st.query_params
 PUBLIC_TENANT_ID = query.get("t")
 if isinstance(PUBLIC_TENANT_ID, list):
     PUBLIC_TENANT_ID = PUBLIC_TENANT_ID[0]
 PUBLIC_TENANT_ID = (PUBLIC_TENANT_ID or "").strip()
-
 IS_PUBLIC = bool(PUBLIC_TENANT_ID)
 
 
 # ============================================================
-# STATE
+# SESSION STATE
 # ============================================================
 if "access_token" not in st.session_state:
     st.session_state.access_token = None
@@ -243,12 +256,10 @@ def get_auth_user(access_token: str):
 
 # ============================================================
 # TENANT LOAD
-# - público: via Edge Function (recomendado) OU service role fallback
-# - admin: via RLS (owner_user_id = auth.uid())
 # ============================================================
 @st.cache_data(ttl=60, show_spinner=False)
 def carregar_tenant_publico(tenant_id: str) -> dict | None:
-    # ✅ Recomendado: Edge Function tenant-public
+    # ✅ via Edge Function tenant-public (recomendado)
     if URL_TENANT_PUBLIC:
         try:
             resp = requests.post(
@@ -266,7 +277,7 @@ def carregar_tenant_publico(tenant_id: str) -> dict | None:
         except Exception:
             return None
 
-    # ⚠️ Fallback temporário (não ideal): service role no app
+    # ⚠️ fallback temporário (não ideal): service role no app
     sb = sb_service()
     if not sb:
         return None
@@ -274,7 +285,7 @@ def carregar_tenant_publico(tenant_id: str) -> dict | None:
     try:
         resp = (
             sb.table("tenants")
-            .select("id,nome,ativo,whatsapp_numero,pix_chave,pix_nome,pix_cidade,whatsapp")
+            .select("id,nome,ativo,paid_until,billing_status,whatsapp_numero,pix_chave,pix_nome,pix_cidade,whatsapp")
             .eq("id", tenant_id)
             .limit(1)
             .execute()
@@ -291,15 +302,13 @@ def carregar_tenant_publico(tenant_id: str) -> dict | None:
 
 def carregar_tenant_admin(access_token: str) -> dict | None:
     sb = sb_user(access_token)
-    # Pela sua modelagem: tenants.owner_user_id = auth.uid()
     try:
         resp = (
             sb.table("tenants")
-            .select("id,nome,ativo,whatsapp_numero,pix_chave,pix_nome,pix_cidade,whatsapp")
+            .select("id,nome,ativo,paid_until,billing_status,whatsapp_numero,pix_chave,pix_nome,pix_cidade,whatsapp")
             .limit(1)
             .execute()
         )
-        # Com sua policy tenant_select_own, isso deve voltar só o tenant do dono
         if resp.data:
             t = resp.data[0]
             if "ativo" not in t:
@@ -402,7 +411,7 @@ def inserir_pre_agendamento_publico(
 
 
 # ============================================================
-# ADMIN: AGENDAMENTOS (via RLS + token do usuário)
+# ADMIN: AGENDAMENTOS
 # ============================================================
 def listar_agendamentos_admin(access_token: str, tenant_id: str):
     sb = sb_user(access_token)
@@ -460,7 +469,6 @@ def excluir_agendamento_admin(access_token: str, tenant_id: str, ag_id: int):
 
 
 def atualizar_finalizados_admin(access_token: str, tenant_id: str):
-    # transforma "pago" em "finalizado" quando já passou do horário
     try:
         sb = sb_user(access_token)
         hoje = date.today().isoformat()
@@ -485,10 +493,12 @@ def atualizar_finalizados_admin(access_token: str, tenant_id: str):
 
 
 # ============================================================
-# WHATSAPP
+# WHATSAPP (CLIENTE)
 # ============================================================
-def montar_mensagem_pagamento(nome, data_atendimento: date, horario, servicos: list[str], valor_sinal: float,
-                             pix_chave: str, pix_nome: str, pix_cidade: str):
+def montar_mensagem_pagamento(
+    nome, data_atendimento: date, horario, servicos: list[str], valor_sinal: float,
+    pix_chave: str, pix_nome: str, pix_cidade: str
+):
     servs = normalizar_servicos(servicos)
     total = calcular_total_servicos(servs)
 
@@ -524,16 +534,17 @@ def tela_publica():
     tenant = carregar_tenant_publico(PUBLIC_TENANT_ID)
     if not tenant:
         st.error("Este link não é válido, não existe ou não está público ainda.")
-        st.info("Se você é a profissional, acesse o link sem ?t= para entrar no painel e gerar seu link.")
+        st.info("Se você é a profissional, acesse o link sem ?t= para entrar no painel.")
         st.stop()
 
-    if tenant.get("ativo") is False:
-        st.error("Este cadastro está inativo. Fale com o suporte.")
+    # Bloqueio por mensalidade (sem free)
+    if not is_tenant_pago(tenant) or (tenant.get("ativo") is False):
+        st.warning("Agenda indisponível no momento 😕")
+        st.info("A profissional está com a agenda temporariamente fechada.")
         st.stop()
 
     st.caption(f"Agenda de: **{tenant.get('nome', 'Profissional')}**")
 
-    # config por loja
     whatsapp_num = (tenant.get("whatsapp_numero") or tenant.get("whatsapp") or "").strip()
     pix_chave = (tenant.get("pix_chave") or "").strip()
     pix_nome = (tenant.get("pix_nome") or "Profissional").strip()
@@ -631,7 +642,6 @@ def tela_publica():
                     st.warning("Você já enviou esse agendamento. Se quiser mudar, fale com a profissional.")
                     st.session_state.reservando = False
                 else:
-                    # Revalida ocupação
                     if horario_escolhido in horarios_ocupados_publico(PUBLIC_TENANT_ID, data_atendimento):
                         st.warning("Esse horário já foi reservado. Escolha outro.")
                         st.session_state.reservando = False
@@ -687,7 +697,7 @@ def tela_publica():
 
 
 # ============================================================
-# UI: MODO ADMIN (LOGIN + PAINEL)
+# UI: MODO ADMIN
 # ============================================================
 def tela_admin():
     st.subheader("Área da Profissional 🔐")
@@ -720,7 +730,6 @@ def tela_admin():
 
         st.stop()
 
-    # logado
     access_token = st.session_state.access_token
     user = get_auth_user(access_token)
     if not user:
@@ -729,32 +738,54 @@ def tela_admin():
         st.stop()
 
     tenant = carregar_tenant_admin(access_token)
-
     if not tenant:
-        st.warning("Você ainda não tem uma loja (tenant) criada.")
-        st.info("Como você modelou 'tenants.owner_user_id = auth.uid()', crie seu tenant via SQL (por enquanto) "
-                "ou crie uma Edge Function de onboarding (recomendado).")
-        st.button("Sair", on_click=auth_logout)
-        st.stop()
-
-    if tenant.get("ativo") is False:
-        st.error("Seu cadastro está inativo. Fale com o suporte.")
-        st.button("Sair", on_click=auth_logout)
+        st.warning("Você ainda não tem um tenant (loja) criado para esse usuário.")
+        st.info("Pelo seu SQL: tenants.owner_user_id é único. Crie o tenant do usuário no Supabase (SQL/Table Editor) e pronto.")
+        if st.button("Sair"):
+            auth_logout()
         st.stop()
 
     tenant_id = tenant["id"]
-    st.success(f"Acesso liberado ✅  •  Loja: **{tenant.get('nome','Minha loja')}**")
+
+    # Bloqueio SaaS: sem free
+    if (tenant.get("ativo") is False) or (not is_tenant_pago(tenant)):
+        st.error("🔒 Assinatura mensal pendente")
+
+        paid_until = parse_date_iso(tenant.get("paid_until"))
+        if paid_until:
+            st.caption(f"Venceu em **{paid_until.strftime('%d/%m/%Y')}**.")
+        else:
+            st.caption("paid_until vazio (não ativado).")
+
+        st.markdown("Para liberar, faça o Pix mensal e envie o comprovante no WhatsApp do suporte.")
+
+        st.info(
+            f"💰 **Valor:** {SAAS_MENSAL_VALOR}\n\n"
+            f"🔑 **Chave Pix:** {SAAS_PIX_CHAVE or '(configure SAAS_PIX_CHAVE)'}\n\n"
+            f"👤 **Nome:** {SAAS_PIX_NOME}\n\n"
+            f"🏙️ **Cidade:** {SAAS_PIX_CIDADE}\n\n"
+            f"🆔 **tenant_id:** {tenant_id}"
+        )
+
+        if SAAS_SUPORTE_WHATSAPP:
+            msg = f"Olá! Paguei a mensalidade. Email: {user.email} | tenant_id: {tenant_id}"
+            link = montar_link_whatsapp(SAAS_SUPORTE_WHATSAPP, msg)
+            st.link_button("📲 Enviar comprovante no WhatsApp", link, use_container_width=True)
+        else:
+            st.warning("Configure no secrets: SAAS_SUPORTE_WHATSAPP (seu WhatsApp do suporte).")
+
+        if st.button("Sair"):
+            auth_logout()
+        st.stop()
+
+    st.success(f"Acesso liberado ✅ • Loja: **{tenant.get('nome','Minha loja')}**")
 
     colA, colB = st.columns([1, 1])
     with colA:
         if st.button("Sair"):
             auth_logout()
     with colB:
-        # Mostra link público
-        base = st.secrets.get("PUBLIC_APP_BASE_URL", "").strip()
-        if not base:
-            st.caption("Dica: adicione no secrets `PUBLIC_APP_BASE_URL` com a URL do seu Streamlit (ex: https://seuapp.streamlit.app)")
-            base = "https://SEUAPP.streamlit.app"
+        base = PUBLIC_APP_BASE_URL or "https://SEUAPP.streamlit.app"
         st.caption("Seu link para clientes:")
         st.code(f"{base}/?t={tenant_id}")
 
@@ -764,7 +795,6 @@ def tela_admin():
     st.subheader("📋 Agendamentos / Reservas")
 
     df_admin = listar_agendamentos_admin(access_token, tenant_id)
-
     if df_admin.empty:
         st.info("Nenhum agendamento encontrado.")
         return
@@ -790,7 +820,6 @@ def tela_admin():
         mes_sel = st.selectbox("Mês", list(range(1, 13)), index=date.today().month - 1)
 
     df_filtrado = df_admin.copy()
-
     if periodo == "Mês":
         df_filtrado = df_filtrado[
             (df_filtrado["Data_dt"].dt.year == int(ano_sel)) &
@@ -816,11 +845,9 @@ def tela_admin():
     df_show = df_filtrado.drop(columns=["Data_dt"]).copy()
     df_show["Preço do serviço"] = df_show["Preço do serviço"].apply(lambda v: fmt_brl(float(v)))
     df_show["Sinal"] = df_show["Sinal"].apply(lambda v: fmt_brl(float(v)))
-
     st.dataframe(df_show.drop(columns=["id"]), use_container_width=True)
 
     st.divider()
-
     st.subheader("✅ Marcar como PAGO")
     op_pagar = df_filtrado.apply(
         lambda r: f'#{r["id"]} | {r["Cliente"]} | {r["Data"]} | {r["Horário"]} | {r["Serviço(s)"]} | {r["Status"]}',
