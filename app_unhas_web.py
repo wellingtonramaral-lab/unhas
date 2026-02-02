@@ -741,13 +741,19 @@ def tela_admin():
 
     tenant = carregar_tenant_admin(access_token)
     if not tenant:
-        st.warning("Você ainda não tem um tenant (loja) criado para esse usuário.")
-        st.info("Crie 1 registro na tabela tenants para esse usuário (owner_user_id = auth.users.id).")
-        if st.button("Sair"):
-            auth_logout()
+    st.warning("Você ainda não tem um tenant (loja) criado para esse usuário.")
+    st.info("Tentando criar automaticamente...")
+
+    out = criar_tenant_se_nao_existir(access_token)
+
+    if not out or (isinstance(out, dict) and out.get("ok") is False):
+        st.error("Falhou ao criar tenant automaticamente.")
+        st.info("Abra Supabase → Edge Functions → create-tenant → Invocations/Logs e veja o erro.")
         st.stop()
 
-    tenant_id = tenant["id"]
+    st.success("Tenant criado! Recarregando...")
+    st.rerun()
+
 
     if (tenant.get("ativo") is False) or (not is_tenant_pago(tenant)):
         st.error("🔒 Assinatura mensal pendente")
