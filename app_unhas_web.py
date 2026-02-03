@@ -1,4 +1,3 @@
-# streamlit/app_unhas_web.py
 import streamlit as st
 import pandas as pd
 from datetime import date, datetime, timedelta, timezone
@@ -30,7 +29,7 @@ st.title("💅 Agendamento de Unhas")
 SUPABASE_URL = st.secrets["SUPABASE_URL"]
 SUPABASE_ANON_KEY = st.secrets["SUPABASE_ANON_KEY"]
 
-# Edge Functions do seu projeto (OBRIGATÓRIAS)
+# Edge Functions do seu projeto
 URL_RESERVAR = st.secrets.get("URL_RESERVAR", "").strip()
 URL_HORARIOS = st.secrets.get("URL_HORARIOS", "").strip()
 URL_TENANT_PUBLIC = st.secrets.get("URL_TENANT_PUBLIC", "").strip()
@@ -187,11 +186,17 @@ def fn_headers():
         "Authorization": f"Bearer {SUPABASE_ANON_KEY}",
     }
 
-def assert_edge_config():
+def assert_edge_config(must_have_create: bool = False):
     missing = []
-    if not URL_TENANT_PUBLIC: missing.append("URL_TENANT_PUBLIC")
-    if not URL_RESERVAR: missing.append("URL_RESERVAR")
-    if not URL_HORARIOS: missing.append("URL_HORARIOS")
+    if not URL_TENANT_PUBLIC:
+        missing.append("URL_TENANT_PUBLIC")
+    if not URL_RESERVAR:
+        missing.append("URL_RESERVAR")
+    if not URL_HORARIOS:
+        missing.append("URL_HORARIOS")
+    if must_have_create and (not URL_CREATE_TENANT):
+        missing.append("URL_CREATE_TENANT")
+
     if missing:
         st.error("Configuração incompleta no secrets.")
         st.code({"missing": missing})
@@ -218,22 +223,15 @@ if "reservando" not in st.session_state:
     st.session_state.reservando = False
 if "ultima_chave_reserva" not in st.session_state:
     st.session_state.ultima_chave_reserva = None
+if "show_settings" not in st.session_state:
+    st.session_state.show_settings = False
 
 # ============================================================
 # AUTH (ADMIN)
 # ============================================================
-def auth_signup(email: str, password: str, nome: str):
+def auth_signup(email: str, password: str):
     sb = sb_anon()
-    return sb.auth.sign_up({
-        "email": email,
-        "password": password,
-        "options": {
-            "data": {
-                "display_name": nome.strip()
-            }
-        }
-    })
-
+    return sb.auth.sign_up({"email": email, "password": password})
 
 def auth_login(email: str, password: str):
     sb = sb_anon()
@@ -282,8 +280,7 @@ def salvar_profile(access_token: str, dados: dict):
 # ============================================================
 def carregar_tenant_publico(tenant_id: str) -> dict | None:
     """Carrega tenant via Edge Function tenant-public.
-    Retorna o tenant mesmo quando ok=false (bloqueado),
-    para a UI exibir a tela de assinatura.
+    Retorna o tenant mesmo quando bloqueado, para UI mostrar assinatura.
     """
     assert_edge_config()
     try:
@@ -323,8 +320,7 @@ def criar_tenant_se_nao_existir(access_token: str) -> dict | None:
     if not user:
         return {"ok": False, "error": "user_not_found"}
 
-    if not URL_CREATE_TENANT:
-        return {"ok": False, "error": "missing_URL_CREATE_TENANT"}
+    assert_edge_config(must_have_create=True)
 
     try:
         resp = requests.post(
@@ -551,6 +547,54 @@ def montar_mensagem_pagamento_cliente(
     return msg
 
 # ============================================================
+# UI: Drawer de Configurações (Engrenagem)
+# ============================================================
+def drawer_configuracoes_perfil(access_token: str):
+    left, right = st.columns([10, 1])
+    with left:
+        st.subheader("Área da Profissional 🔐")
+    with right:
+        if st.button("⚙️", key="btn_settings_top", help="Configurações do perfil"):
+            st.session_state.show_settings = not st.session_state.show_settings
+
+    if st.session_state.show_settings:
+        with st.container(border=True):
+            st.markdown("### ⚙️ Configurações do perfil")
+
+            profile = carregar_profile(access_token)
+            if not profile:
+                st.error("Não foi possível carregar seu perfil.")
+                return
+
+            nome = st.text_input("Nome da profissional", value=profile.get("nome") or "", key="set_nome")
+            whatsapp = st.text_input("WhatsApp (somente números)", value=profile.get("whatsapp") or "", key="set_whats")
+            pix_chave = st.text_input("Chave Pix", value=profile.get("pix_chave") or "", key="set_pix_chave")
+            pix_nome = st.text_input("Nome do Pix", value=profile.get("pix_nome") or "", key="set_pix_nome")
+            pix_cidade = st.text_input("Cidade do Pix", value=profile.get("pix_cidade") or "", key="set_pix_cidade")
+
+            col1, col2 = st.columns([1, 1])
+            with col1:
+                if st.button("💾 Salvar", use_container_width=True, key="btn_save_profile_drawer"):
+                    salvar_profile(
+                        access_token,
+                        {
+                            "nome": nome.strip(),
+                            "whatsapp": whatsapp.strip(),
+                            "pix_chave": pix_chave.strip(),
+                            "pix_nome": pix_nome.strip(),
+                            "pix_cidade": pix_cidade.strip(),
+                        }
+                    )
+                    st.success("Perfil atualizado com sucesso!")
+                    st.session_state.show_settings = False
+                    st.rerun()
+
+            with col2:
+                if st.button("Fechar", use_container_width=True, key="btn_close_profile_drawer"):
+                    st.session_state.show_settings = False
+                    st.rerun()
+
+# ============================================================
 # UI: MODO PÚBLICO (SaaS)
 # ============================================================
 def tela_publica():
@@ -564,7 +608,7 @@ def tela_publica():
     nome_prof = tenant.get("nome") or "Profissional"
     st.caption(f"Agenda de: **{nome_prof}**")
 
-    # 🔒 REGRA ÚNICA: backend retorna pode_operar
+    # backend retorna pode_operar
     if not tenant.get("pode_operar", False):
         st.error("🔒 Assinatura vencida ou conta inativa")
 
@@ -739,66 +783,11 @@ def tela_publica():
                 st.markdown(f"**Página {i}**")
                 st.image(img_bytes, use_container_width=True)
 
-def drawer_configuracoes_perfil(access_token: str):
-    """
-    Engrenagem no topo -> abre área de configurações do perfil.
-    Salva no profiles e (opcional) força rerun.
-    """
-    # estado do drawer
-    if "show_settings" not in st.session_state:
-        st.session_state.show_settings = False
-
-    # topo com engrenagem
-    left, right = st.columns([10, 1])
-    with left:
-        st.subheader("Área da Profissional 🔐")
-    with right:
-        if st.button("⚙️", key="btn_settings_top", help="Configurações do perfil"):
-            st.session_state.show_settings = not st.session_state.show_settings
-
-    # drawer
-    if st.session_state.show_settings:
-        with st.container(border=True):
-            st.markdown("### ⚙️ Configurações do perfil")
-
-            profile = carregar_profile(access_token)
-            if not profile:
-                st.error("Não foi possível carregar seu perfil.")
-                return
-
-            nome = st.text_input("Nome da profissional", value=profile.get("nome") or "", key="set_nome")
-            whatsapp = st.text_input("WhatsApp (somente números)", value=profile.get("whatsapp") or "", key="set_whats")
-            pix_chave = st.text_input("Chave Pix", value=profile.get("pix_chave") or "", key="set_pix_chave")
-            pix_nome = st.text_input("Nome do Pix", value=profile.get("pix_nome") or "", key="set_pix_nome")
-            pix_cidade = st.text_input("Cidade do Pix", value=profile.get("pix_cidade") or "", key="set_pix_cidade")
-
-            col1, col2 = st.columns([1, 1])
-            with col1:
-                if st.button("💾 Salvar", use_container_width=True, key="btn_save_profile_drawer"):
-                    salvar_profile(
-                        access_token,
-                        {
-                            "nome": nome.strip(),
-                            "whatsapp": whatsapp.strip(),
-                            "pix_chave": pix_chave.strip(),
-                            "pix_nome": pix_nome.strip(),
-                            "pix_cidade": pix_cidade.strip(),
-                        }
-                    )
-                    st.success("Perfil atualizado com sucesso!")
-                    st.session_state.show_settings = False
-                    st.rerun()
-
-            with col2:
-                if st.button("Fechar", use_container_width=True,
-
-
 # ============================================================
-# UI: MODO ADMIN
+# UI: MODO ADMIN (com engrenagem)
 # ============================================================
 def tela_admin():
-    st.subheader("Área da Profissional 🔐")
-
+    # 1) Se não está logado, mostra login/cadastro e para
     if not st.session_state.access_token:
         tab1, tab2 = st.tabs(["Entrar", "Criar conta"])
 
@@ -819,16 +808,15 @@ def tela_admin():
             password = st.text_input("Senha", type="password", key="cad_pass")
             if st.button("Criar conta"):
                 try:
-                    auth_signup(email, password, nome)
+                    auth_signup(email, password)
                     st.success("Conta criada! Agora volte na aba Entrar e faça login.")
                 except Exception as e:
                     st.error("Falha ao criar conta.")
                     st.code(str(e))
 
         st.stop()
-    
-    drawer_configuracoes_perfil(access_token)
 
+    # 2) Já está logado
     access_token = st.session_state.access_token
     user = get_auth_user(access_token)
     if not user:
@@ -836,6 +824,10 @@ def tela_admin():
         auth_logout()
         st.stop()
 
+    # ✅ Engrenagem no topo
+    drawer_configuracoes_perfil(access_token)
+
+    # 3) Tenant
     tenant = carregar_tenant_admin(access_token)
     if not tenant:
         st.warning("Você ainda não tem um tenant (loja) criado para esse usuário.")
@@ -845,7 +837,7 @@ def tela_admin():
 
         if not out or (isinstance(out, dict) and out.get("ok") is False):
             st.error("Falhou ao criar tenant automaticamente.")
-            st.info("Verifique a Edge Function create-tenant e o SQL (unique owner_user_id).")
+            st.info("Verifique create-tenant no Supabase e a UNIQUE(owner_user_id).")
             if isinstance(out, dict):
                 st.code(out)
             st.stop()
@@ -860,8 +852,7 @@ def tela_admin():
 
     tenant_id = str(tenant.get("id"))
 
-    # (Opcional) Bloqueio no ADMIN: você pode manter ou remover.
-    # Aqui mantive igual seu app: se não estiver ativo/pago, bloqueia.
+    # 4) Bloqueio SaaS no ADMIN
     paid_until = parse_date_iso(tenant.get("paid_until"))
     hoje = date.today()
     pago = bool(paid_until and paid_until >= hoje)
@@ -899,6 +890,7 @@ def tela_admin():
 
     st.success(f"Acesso liberado ✅ • Loja: **{tenant.get('nome','Minha loja')}**")
 
+    # 5) Link público + sair
     colA, colB = st.columns([1, 1])
     with colA:
         if st.button("Sair"):
@@ -907,10 +899,6 @@ def tela_admin():
         base = PUBLIC_APP_BASE_URL or "https://SEUAPP.streamlit.app"
         st.caption("Seu link para clientes:")
         st.code(f"{base}/?t={tenant_id}")
-
-    st.divider()
-
-
 
     atualizar_finalizados_admin(access_token, tenant_id)
 
