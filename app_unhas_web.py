@@ -222,9 +222,18 @@ if "ultima_chave_reserva" not in st.session_state:
 # ============================================================
 # AUTH (ADMIN)
 # ============================================================
-def auth_signup(email: str, password: str):
+def auth_signup(email: str, password: str, nome: str):
     sb = sb_anon()
-    return sb.auth.sign_up({"email": email, "password": password})
+    return sb.auth.sign_up({
+        "email": email,
+        "password": password,
+        "options": {
+            "data": {
+                "display_name": nome.strip()
+            }
+        }
+    })
+
 
 def auth_login(email: str, password: str):
     sb = sb_anon()
@@ -736,6 +745,8 @@ def tela_publica():
 def tela_admin():
     st.subheader("Área da Profissional 🔐")
 
+    nome = st.text_input("Seu nome (para aparecer no painel)", key="cad_nome")
+    
     if not st.session_state.access_token:
         tab1, tab2 = st.tabs(["Entrar", "Criar conta"])
 
@@ -756,7 +767,7 @@ def tela_admin():
             password = st.text_input("Senha", type="password", key="cad_pass")
             if st.button("Criar conta"):
                 try:
-                    auth_signup(email, password)
+                    auth_signup(email, password, nome)
                     st.success("Conta criada! Agora volte na aba Entrar e faça login.")
                 except Exception as e:
                     st.error("Falha ao criar conta.")
