@@ -8,7 +8,6 @@ from PIL import Image
 import io
 from supabase import create_client
 
-
 # ============================================================
 # TIMEZONE Brasil (UTC-3)
 # ============================================================
@@ -18,13 +17,11 @@ try:
 except Exception:
     LOCAL_TZ = timezone(timedelta(hours=-3))
 
-
 # ============================================================
 # STREAMLIT CONFIG
 # ============================================================
 st.set_page_config(page_title="Agendamento de Unhas 💅", layout="centered")
 st.title("💅 Agendamento de Unhas")
-
 
 # ============================================================
 # SECRETS
@@ -32,7 +29,8 @@ st.title("💅 Agendamento de Unhas")
 SUPABASE_URL = st.secrets["SUPABASE_URL"]
 SUPABASE_ANON_KEY = st.secrets["SUPABASE_ANON_KEY"]
 
-# ⚠️ fallback temporário (evite em SaaS). Melhor: tenant-public (Edge Function).
+# ⚠️ Evite manter service role no app Streamlit público.
+# Melhor: deixar service role só nas Edge Functions.
 SUPABASE_SERVICE_ROLE_KEY = st.secrets.get("SUPABASE_SERVICE_ROLE_KEY", "")
 
 # Edge Functions do seu projeto
@@ -40,8 +38,8 @@ URL_RESERVAR = st.secrets.get("URL_RESERVAR", "")
 URL_HORARIOS = st.secrets.get("URL_HORARIOS", "")
 URL_TENANT_PUBLIC = st.secrets.get("URL_TENANT_PUBLIC", "")
 URL_CREATE_TENANT = st.secrets.get("URL_CREATE_TENANT", "")
-TRIAL_DIAS = int(st.secrets.get("TRIAL_DIAS", 7))
 
+TRIAL_DIAS = int(st.secrets.get("TRIAL_DIAS", 7))
 TEMPO_EXPIRACAO_MIN = int(st.secrets.get("TEMPO_EXPIRACAO_MIN", 60))
 PUBLIC_APP_BASE_URL = st.secrets.get("PUBLIC_APP_BASE_URL", "").strip()
 
@@ -54,7 +52,6 @@ SAAS_PIX_CIDADE = st.secrets.get("SAAS_PIX_CIDADE", "BRASIL").strip()
 SAAS_MENSAL_VALOR = st.secrets.get("SAAS_MENSAL_VALOR", "R$ 39,90").strip()
 SAAS_SUPORTE_WHATSAPP = st.secrets.get("SAAS_SUPORTE_WHATSAPP", "").strip()
 
-
 # ============================================================
 # SUPABASE CLIENTS
 # ============================================================
@@ -62,9 +59,7 @@ def sb_anon():
     return create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
 
 def sb_user(access_token: str):
-    """
-    ✅ FIX: compatível com a lib supabase instalada no Streamlit.
-    """
+    """Compatível com a lib supabase instalada no Streamlit."""
     sb = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
     sb.postgrest.auth(access_token)
     return sb
@@ -73,7 +68,6 @@ def sb_service():
     if not SUPABASE_SERVICE_ROLE_KEY:
         return None
     return create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
-
 
 # ============================================================
 # HELPERS
@@ -110,12 +104,12 @@ def parse_date_iso(d) -> date | None:
         return None
 
 def is_tenant_pago(tenant: dict) -> bool:
+    """Mantido para admin (modo público agora usa tenant['pode_operar'])."""
     hoje = date.today()
     paid_until = parse_date_iso(tenant.get("paid_until"))
     if not paid_until:
         return False
     return paid_until >= hoje
-
 
 # ============================================================
 # PREÇOS / SINAL FIXO
@@ -161,7 +155,6 @@ def calcular_total_por_texto_servico(texto_servico: str) -> float:
     servs = texto_para_lista_servicos(texto_servico)
     return calcular_total_servicos(servs)
 
-
 # ============================================================
 # HORÁRIOS POR DIA
 # ============================================================
@@ -172,7 +165,6 @@ def horarios_do_dia(d: date) -> list[str]:
     if wd == 5:
         return ["10:30", "14:00", "18:00"]
     return []
-
 
 # ============================================================
 # CATÁLOGO PDF → IMAGENS
@@ -200,21 +192,16 @@ def pdf_para_imagens_com_fundo_branco(caminho_pdf: str, zoom: float = 2.0):
     doc.close()
     return imagens
 
-
 # ============================================================
 # EDGE FUNCTIONS HELPERS
 # ============================================================
 def fn_headers():
-    """
-    ✅ Importante: Supabase Edge Functions exigem apikey/Authorization.
-    Isso remove o erro 401 Missing authorization header.
-    """
+    """Supabase Edge Functions exigem apikey/Authorization."""
     return {
         "Content-Type": "application/json",
         "apikey": SUPABASE_ANON_KEY,
         "Authorization": f"Bearer {SUPABASE_ANON_KEY}",
     }
-
 
 # ============================================================
 # ROUTING: PUBLIC vs ADMIN
@@ -225,7 +212,6 @@ if isinstance(PUBLIC_TENANT_ID, list):
     PUBLIC_TENANT_ID = PUBLIC_TENANT_ID[0]
 PUBLIC_TENANT_ID = (PUBLIC_TENANT_ID or "").strip()
 IS_PUBLIC = bool(PUBLIC_TENANT_ID)
-
 
 # ============================================================
 # SESSION STATE
@@ -238,7 +224,6 @@ if "reservando" not in st.session_state:
     st.session_state.reservando = False
 if "ultima_chave_reserva" not in st.session_state:
     st.session_state.ultima_chave_reserva = None
-
 
 # ============================================================
 # AUTH (ADMIN)
@@ -263,12 +248,40 @@ def get_auth_user(access_token: str):
     except Exception:
         return None
 
+# ============================================================
+# PROFILE (ADMIN)
+# ============================================================
+def carregar_profile(access_token: str) -> dict | None:
+    sb = sb_user(access_token)
+    try:
+        resp = (
+            sb.table("profiles")
+            .select("id,email,nome,whatsapp,pix_chave,pix_nome,pix_cidade")
+            .eq("id", sb.auth.get_user(access_token).user.id)
+            .single()
+            .execute()
+        )
+        return resp.data
+    except Exception:
+        return None
+
+def salvar_profile(access_token: str, dados: dict):
+    sb = sb_user(access_token)
+    return (
+        sb.table("profiles")
+        .update(dados)
+        .eq("id", sb.auth.get_user(access_token).user.id)
+        .execute()
+    )
 
 # ============================================================
 # TENANT LOAD (público / admin)
 # ============================================================
 def carregar_tenant_publico(tenant_id: str) -> dict | None:
-    # ✅ via Edge Function tenant-public
+    """Carrega tenant via Edge Function tenant-public.
+    IMPORTANTE: retorna o tenant mesmo quando ok=false (bloqueado),
+    para a UI exibir a tela de assinatura.
+    """
     if URL_TENANT_PUBLIC:
         try:
             resp = requests.post(
@@ -279,14 +292,15 @@ def carregar_tenant_publico(tenant_id: str) -> dict | None:
             )
             if resp.status_code != 200:
                 return None
+
             payload = resp.json()
-            if isinstance(payload, dict) and payload.get("ok") and isinstance(payload.get("tenant"), dict):
+            if isinstance(payload, dict) and isinstance(payload.get("tenant"), dict):
                 return payload["tenant"]
             return None
         except Exception:
             return None
 
-    # ⚠️ fallback temporário (não ideal): service role no app
+    # ⚠️ fallback (não ideal): service role no app
     sb = sb_service()
     if not sb:
         return None
@@ -301,13 +315,11 @@ def carregar_tenant_publico(tenant_id: str) -> dict | None:
         )
         if resp.data:
             t = resp.data[0]
-            if "ativo" not in t:
-                t["ativo"] = True
+            t["pode_operar"] = bool(t.get("ativo", True)) and is_tenant_pago(t) and (t.get("billing_status", "active") == "active")
             return t
         return None
     except Exception:
         return None
-
 
 def carregar_tenant_admin(access_token: str) -> dict | None:
     sb = sb_user(access_token)
@@ -323,15 +335,8 @@ def carregar_tenant_admin(access_token: str) -> dict | None:
     except Exception:
         return None
 
-
 def criar_tenant_se_nao_existir(access_token: str) -> dict | None:
-    """
-    Cria um tenant para o usuário logado (caso ainda não exista).
-    Prioridade:
-      1) Edge Function (URL_CREATE_TENANT), se configurada
-      2) Insert direto na tabela 'tenants' usando o usuário autenticado (RLS deve permitir)
-    Retorna dict com {"ok": True, "tenant_id": "..."} quando der certo.
-    """
+    """Cria um tenant para o usuário logado (caso ainda não exista)."""
     user = get_auth_user(access_token)
     if not user:
         return {"ok": False, "error": "user_not_found"}
@@ -354,7 +359,7 @@ def criar_tenant_se_nao_existir(access_token: str) -> dict | None:
         except Exception as e:
             return {"ok": False, "error": "edge_exception", "details": str(e)}
 
-    # 2) fallback: insert direto (evite em produção sem revisar RLS)
+    # 2) fallback: insert direto (evite em produção)
     try:
         sb = sb_user(access_token)
         paid_until = (date.today() + timedelta(days=int(TRIAL_DIAS))).isoformat()
@@ -373,14 +378,10 @@ def criar_tenant_se_nao_existir(access_token: str) -> dict | None:
             .execute()
         )
 
-        tenant_id = None
-        if resp and isinstance(resp.data, dict):
-            tenant_id = resp.data.get("id")
-
+        tenant_id = resp.data.get("id") if resp and isinstance(resp.data, dict) else None
         return {"ok": True, "tenant_id": tenant_id}
     except Exception as e:
         return {"ok": False, "error": "insert_exception", "details": str(e)}
-
 
 # ============================================================
 # PUBLIC: HORÁRIOS OCUPADOS + RESERVA
@@ -424,10 +425,8 @@ def horarios_ocupados_publico(tenant_id: str, data_escolhida: date) -> set[str]:
                             ocupados.add(horario)
 
         return ocupados
-
     except Exception:
         return set()
-
 
 def inserir_pre_agendamento_publico(
     tenant_id: str,
@@ -460,9 +459,16 @@ def inserir_pre_agendamento_publico(
             return None
 
         out = resp.json()
+
         if isinstance(out, dict) and out.get("ok") is False:
-            st.error("Erro retornado pela função:")
-            st.code(out)
+            err = out.get("error")
+            if err == "tenant_blocked":
+                st.error("🔒 Agenda indisponível (assinatura vencida/inativa).")
+            elif err == "slot_taken":
+                st.warning("Esse horário já foi reservado. Escolha outro.")
+            else:
+                st.error("Erro retornado pela função:")
+                st.code(out)
             return None
 
         return out
@@ -471,7 +477,6 @@ def inserir_pre_agendamento_publico(
         st.error("Falha de rede ao chamar a função de reserva.")
         st.code(str(e))
         return None
-
 
 # ============================================================
 # ADMIN: AGENDAMENTOS
@@ -508,7 +513,6 @@ def listar_agendamentos_admin(access_token: str, tenant_id: str):
 
     return df
 
-
 def marcar_como_pago_admin(access_token: str, tenant_id: str, ag_id: int):
     sb = sb_user(access_token)
     return (
@@ -519,7 +523,6 @@ def marcar_como_pago_admin(access_token: str, tenant_id: str, ag_id: int):
         .execute()
     )
 
-
 def excluir_agendamento_admin(access_token: str, tenant_id: str, ag_id: int):
     sb = sb_user(access_token)
     return (
@@ -529,7 +532,6 @@ def excluir_agendamento_admin(access_token: str, tenant_id: str, ag_id: int):
         .eq("id", ag_id)
         .execute()
     )
-
 
 def atualizar_finalizados_admin(access_token: str, tenant_id: str):
     try:
@@ -554,7 +556,6 @@ def atualizar_finalizados_admin(access_token: str, tenant_id: str):
     except Exception:
         return
 
-
 # ============================================================
 # WHATSAPP
 # ============================================================
@@ -568,9 +569,7 @@ def montar_mensagem_pagamento_cliente(
 ):
     servs = normalizar_servicos(servicos)
     total = calcular_total_servicos(servs)
-
     lista = "\n".join([f"• {s} ({fmt_brl(PRECOS.get(s, 0.0))})" for s in servs]) if servs else "-"
-
     msg = (
         "Olá! Quero reservar meu horário. 💅\n\n"
         f"👩 Cliente: {nome}\n"
@@ -588,25 +587,45 @@ def montar_mensagem_pagamento_cliente(
     )
     return msg
 
-
 # ============================================================
-# UI: MODO PÚBLICO
+# UI: MODO PÚBLICO (SaaS)
 # ============================================================
 def tela_publica():
     tenant = carregar_tenant_publico(PUBLIC_TENANT_ID)
+
     if not tenant:
         st.error("Este link não é válido, não existe ou não está público ainda.")
         st.info("Se você é a profissional, acesse o link sem ?t= para entrar no painel.")
         st.stop()
 
-    if (tenant.get("ativo") is False) or (not is_tenant_pago(tenant)):
-        st.warning("Agenda indisponível no momento 😕")
-        st.info("A profissional está com a agenda temporariamente fechada.")
-        st.stop()
-
     nome_prof = tenant.get("nome") or "Profissional"
     st.caption(f"Agenda de: **{nome_prof}**")
 
+    # 🔒 REGRA ÚNICA: backend retorna pode_operar
+    if not tenant.get("pode_operar", False):
+        st.error("🔒 Assinatura vencida ou conta inativa")
+
+        paid_until = tenant.get("paid_until")
+        if paid_until:
+            st.caption(f"Venceu em **{paid_until}**.")
+
+        st.markdown("Para liberar, faça o Pix mensal e envie o comprovante no WhatsApp do suporte.")
+        st.info(
+            f"💰 **Valor:** {SAAS_MENSAL_VALOR}\n\n"
+            f"🔑 **Chave Pix:** {SAAS_PIX_CHAVE or '(configure SAAS_PIX_CHAVE)'}\n\n"
+            f"👤 **Nome:** {SAAS_PIX_NOME}\n\n"
+            f"🏙️ **Cidade:** {SAAS_PIX_CIDADE}\n\n"
+            f"🆔 **tenant_id:** {tenant.get('id')}"
+        )
+
+        if SAAS_SUPORTE_WHATSAPP:
+            msg = f"Olá! Paguei a mensalidade. tenant_id: {tenant.get('id')} | Loja: {nome_prof}"
+            link = montar_link_whatsapp(SAAS_SUPORTE_WHATSAPP, msg)
+            st.link_button("📲 Enviar comprovante no WhatsApp", link, use_container_width=True)
+        else:
+            st.warning("Configure no secrets: SAAS_SUPORTE_WHATSAPP (seu WhatsApp do suporte).")
+
+        st.stop()
 
     whatsapp_num = (tenant.get("whatsapp_numero") or tenant.get("whatsapp") or "").strip()
     pix_chave = (tenant.get("pix_chave") or "").strip()
@@ -720,7 +739,6 @@ def tela_publica():
 
                         if not resp:
                             st.session_state.reservando = False
-                            st.error("Não consegui criar a reserva. Veja o erro acima e tente novamente.")
                         else:
                             mensagem = montar_mensagem_pagamento_cliente(
                                 nome.strip(),
@@ -758,9 +776,8 @@ def tela_publica():
                 st.markdown(f"**Página {i}**")
                 st.image(img_bytes, use_container_width=True)
 
-
 # ============================================================
-# UI: MODO ADMIN
+# UI: MODO ADMIN (corrigido)
 # ============================================================
 def tela_admin():
     st.subheader("Área da Profissional 🔐")
@@ -796,77 +813,39 @@ def tela_admin():
 
     # 2) Já está logado
     access_token = st.session_state.access_token
-
     user = get_auth_user(access_token)
     if not user:
         st.warning("Sessão expirada. Faça login novamente.")
         auth_logout()
         st.stop()
 
-    st.divider()
-
-    # 3) Perfil (profiles)
-    st.subheader("👩‍💼 Meu perfil")
-    profile = carregar_profile(access_token)
-
-    if not profile:
-        st.error("Não foi possível carregar seu perfil.")
-    else:
-        nome = st.text_input("Nome da profissional", value=profile.get("nome") or "")
-        whatsapp = st.text_input("WhatsApp (somente números)", value=profile.get("whatsapp") or "")
-        pix_chave = st.text_input("Chave Pix", value=profile.get("pix_chave") or "")
-        pix_nome = st.text_input("Nome do Pix", value=profile.get("pix_nome") or "")
-        pix_cidade = st.text_input("Cidade do Pix", value=profile.get("pix_cidade") or "")
-
-        if st.button("💾 Salvar dados do perfil"):
-            salvar_profile(
-                access_token,
-                {
-                    "nome": nome.strip(),
-                    "whatsapp": whatsapp.strip(),
-                    "pix_chave": pix_chave.strip(),
-                    "pix_nome": pix_nome.strip(),
-                    "pix_cidade": pix_cidade.strip(),
-                },
-            )
-            st.success("Perfil atualizado com sucesso!")
-            st.rerun()
-
-    st.divider()
-
-    # 4) Tenant
+    # 3) Tenant
     tenant = carregar_tenant_admin(access_token)
     if not tenant:
         st.warning("Você ainda não tem um tenant (loja) criado para esse usuário.")
         st.info("Tentando criar automaticamente...")
 
         out = criar_tenant_se_nao_existir(access_token)
+
         if not out or (isinstance(out, dict) and out.get("ok") is False):
             st.error("Falhou ao criar tenant automaticamente.")
             st.info("Abra Supabase → Edge Functions → create-tenant → Invocations/Logs e veja o erro.")
-            st.code(out)
+            if isinstance(out, dict):
+                st.code(out)
             st.stop()
 
         st.success("Tenant criado! Recarregando...")
         st.rerun()
 
-    # Recarrega tenant
     tenant = carregar_tenant_admin(access_token)
     if not tenant:
         st.error("Não consegui carregar o tenant deste usuário.")
         st.stop()
 
     tenant_id = str(tenant.get("id"))
-    st.success(f"Acesso liberado ✅ • Loja: **{tenant.get('nome','Minha loja')}**")
 
-    # Link público do cliente
-    base = PUBLIC_APP_BASE_URL or "https://SEUAPP.streamlit.app"
-    st.caption("Seu link para clientes:")
-    st.code(f"{base}/?t={tenant_id}")
-
-    # Aqui continua seu painel (agendamentos etc.)...
-
-    if (tenant.get("ativo") is False) or (not is_tenant_pago(tenant)):
+    # 4) Bloqueio SaaS no ADMIN (opcional, mas recomendado)
+    if (tenant.get("ativo") is False) or (not is_tenant_pago(tenant)) or (tenant.get("billing_status") not in (None, "active", "trial")):
         st.error("🔒 Assinatura mensal pendente")
 
         paid_until = parse_date_iso(tenant.get("paid_until"))
@@ -898,6 +877,7 @@ def tela_admin():
 
     st.success(f"Acesso liberado ✅ • Loja: **{tenant.get('nome','Minha loja')}**")
 
+    # 5) Link público
     colA, colB = st.columns([1, 1])
     with colA:
         if st.button("Sair"):
@@ -906,6 +886,34 @@ def tela_admin():
         base = PUBLIC_APP_BASE_URL or "https://SEUAPP.streamlit.app"
         st.caption("Seu link para clientes:")
         st.code(f"{base}/?t={tenant_id}")
+
+    st.divider()
+
+    # 6) Perfil
+    st.subheader("👩‍💼 Meu perfil")
+    profile = carregar_profile(access_token)
+    if not profile:
+        st.error("Não foi possível carregar seu perfil.")
+    else:
+        nome = st.text_input("Nome da profissional", value=profile.get("nome") or "")
+        whatsapp = st.text_input("WhatsApp (somente números)", value=profile.get("whatsapp") or "")
+        pix_chave = st.text_input("Chave Pix", value=profile.get("pix_chave") or "")
+        pix_nome = st.text_input("Nome do Pix", value=profile.get("pix_nome") or "")
+        pix_cidade = st.text_input("Cidade do Pix", value=profile.get("pix_cidade") or "")
+
+        if st.button("💾 Salvar dados do perfil"):
+            salvar_profile(
+                access_token,
+                {
+                    "nome": nome.strip(),
+                    "whatsapp": whatsapp.strip(),
+                    "pix_chave": pix_chave.strip(),
+                    "pix_nome": pix_nome.strip(),
+                    "pix_cidade": pix_cidade.strip(),
+                }
+            )
+            st.success("Perfil atualizado com sucesso!")
+            st.rerun()
 
     atualizar_finalizados_admin(access_token, tenant_id)
 
@@ -993,30 +1001,6 @@ def tela_admin():
             excluir_agendamento_admin(access_token, tenant_id, ag_id)
             st.success("Excluído ✅")
             st.rerun()
-def carregar_profile(access_token: str) -> dict | None:
-    sb = sb_user(access_token)
-    try:
-        resp = (
-            sb.table("profiles")
-            .select("id,email,nome,whatsapp,pix_chave,pix_nome,pix_cidade")
-            .eq("id", sb.auth.get_user(access_token).user.id)
-            .single()
-            .execute()
-        )
-        return resp.data
-    except Exception:
-        return None
-
-
-def salvar_profile(access_token: str, dados: dict):
-    sb = sb_user(access_token)
-    return (
-        sb.table("profiles")
-        .update(dados)
-        .eq("id", sb.auth.get_user(access_token).user.id)
-        .execute()
-    )
-
 
 # ============================================================
 # ROUTER
