@@ -739,6 +739,60 @@ def tela_publica():
                 st.markdown(f"**Página {i}**")
                 st.image(img_bytes, use_container_width=True)
 
+def drawer_configuracoes_perfil(access_token: str):
+    """
+    Engrenagem no topo -> abre área de configurações do perfil.
+    Salva no profiles e (opcional) força rerun.
+    """
+    # estado do drawer
+    if "show_settings" not in st.session_state:
+        st.session_state.show_settings = False
+
+    # topo com engrenagem
+    left, right = st.columns([10, 1])
+    with left:
+        st.subheader("Área da Profissional 🔐")
+    with right:
+        if st.button("⚙️", key="btn_settings_top", help="Configurações do perfil"):
+            st.session_state.show_settings = not st.session_state.show_settings
+
+    # drawer
+    if st.session_state.show_settings:
+        with st.container(border=True):
+            st.markdown("### ⚙️ Configurações do perfil")
+
+            profile = carregar_profile(access_token)
+            if not profile:
+                st.error("Não foi possível carregar seu perfil.")
+                return
+
+            nome = st.text_input("Nome da profissional", value=profile.get("nome") or "", key="set_nome")
+            whatsapp = st.text_input("WhatsApp (somente números)", value=profile.get("whatsapp") or "", key="set_whats")
+            pix_chave = st.text_input("Chave Pix", value=profile.get("pix_chave") or "", key="set_pix_chave")
+            pix_nome = st.text_input("Nome do Pix", value=profile.get("pix_nome") or "", key="set_pix_nome")
+            pix_cidade = st.text_input("Cidade do Pix", value=profile.get("pix_cidade") or "", key="set_pix_cidade")
+
+            col1, col2 = st.columns([1, 1])
+            with col1:
+                if st.button("💾 Salvar", use_container_width=True, key="btn_save_profile_drawer"):
+                    salvar_profile(
+                        access_token,
+                        {
+                            "nome": nome.strip(),
+                            "whatsapp": whatsapp.strip(),
+                            "pix_chave": pix_chave.strip(),
+                            "pix_nome": pix_nome.strip(),
+                            "pix_cidade": pix_cidade.strip(),
+                        }
+                    )
+                    st.success("Perfil atualizado com sucesso!")
+                    st.session_state.show_settings = False
+                    st.rerun()
+
+            with col2:
+                if st.button("Fechar", use_container_width=True,
+
+
 # ============================================================
 # UI: MODO ADMIN
 # ============================================================
@@ -772,6 +826,8 @@ def tela_admin():
                     st.code(str(e))
 
         st.stop()
+    
+    drawer_configuracoes_perfil(access_token)
 
     access_token = st.session_state.access_token
     user = get_auth_user(access_token)
@@ -854,30 +910,7 @@ def tela_admin():
 
     st.divider()
 
-    st.subheader("👩‍💼 Meu perfil")
-    profile = carregar_profile(access_token)
-    if not profile:
-        st.error("Não foi possível carregar seu perfil.")
-    else:
-        nome = st.text_input("Nome da profissional", value=profile.get("nome") or "")
-        whatsapp = st.text_input("WhatsApp (somente números)", value=profile.get("whatsapp") or "")
-        pix_chave = st.text_input("Chave Pix", value=profile.get("pix_chave") or "")
-        pix_nome = st.text_input("Nome do Pix", value=profile.get("pix_nome") or "")
-        pix_cidade = st.text_input("Cidade do Pix", value=profile.get("pix_cidade") or "")
 
-        if st.button("💾 Salvar dados do perfil"):
-            salvar_profile(
-                access_token,
-                {
-                    "nome": nome.strip(),
-                    "whatsapp": whatsapp.strip(),
-                    "pix_chave": pix_chave.strip(),
-                    "pix_nome": pix_nome.strip(),
-                    "pix_cidade": pix_cidade.strip(),
-                }
-            )
-            st.success("Perfil atualizado com sucesso!")
-            st.rerun()
 
     atualizar_finalizados_admin(access_token, tenant_id)
 
