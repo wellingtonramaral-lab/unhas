@@ -745,8 +745,6 @@ def tela_publica():
 def tela_admin():
     st.subheader("Área da Profissional 🔐")
 
-    nome = st.text_input("Seu nome (para aparecer no painel)", key="cad_nome")
-    
     if not st.session_state.access_token:
         tab1, tab2 = st.tabs(["Entrar", "Criar conta"])
 
