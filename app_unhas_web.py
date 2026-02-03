@@ -1,3 +1,4 @@
+# streamlit/app_unhas_web.py
 import streamlit as st
 import pandas as pd
 from datetime import date, datetime, timedelta, timezone
@@ -29,15 +30,11 @@ st.title("💅 Agendamento de Unhas")
 SUPABASE_URL = st.secrets["SUPABASE_URL"]
 SUPABASE_ANON_KEY = st.secrets["SUPABASE_ANON_KEY"]
 
-# ⚠️ Evite manter service role no app Streamlit público.
-# Melhor: deixar service role só nas Edge Functions.
-SUPABASE_SERVICE_ROLE_KEY = st.secrets.get("SUPABASE_SERVICE_ROLE_KEY", "")
-
-# Edge Functions do seu projeto
-URL_RESERVAR = st.secrets.get("URL_RESERVAR", "")
-URL_HORARIOS = st.secrets.get("URL_HORARIOS", "")
-URL_TENANT_PUBLIC = st.secrets.get("URL_TENANT_PUBLIC", "")
-URL_CREATE_TENANT = st.secrets.get("URL_CREATE_TENANT", "")
+# Edge Functions do seu projeto (OBRIGATÓRIAS)
+URL_RESERVAR = st.secrets.get("URL_RESERVAR", "").strip()
+URL_HORARIOS = st.secrets.get("URL_HORARIOS", "").strip()
+URL_TENANT_PUBLIC = st.secrets.get("URL_TENANT_PUBLIC", "").strip()
+URL_CREATE_TENANT = st.secrets.get("URL_CREATE_TENANT", "").strip()
 
 TRIAL_DIAS = int(st.secrets.get("TRIAL_DIAS", 7))
 TEMPO_EXPIRACAO_MIN = int(st.secrets.get("TEMPO_EXPIRACAO_MIN", 60))
@@ -63,11 +60,6 @@ def sb_user(access_token: str):
     sb = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
     sb.postgrest.auth(access_token)
     return sb
-
-def sb_service():
-    if not SUPABASE_SERVICE_ROLE_KEY:
-        return None
-    return create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 
 # ============================================================
 # HELPERS
@@ -102,14 +94,6 @@ def parse_date_iso(d) -> date | None:
         return date.fromisoformat(str(d))
     except Exception:
         return None
-
-def is_tenant_pago(tenant: dict) -> bool:
-    """Mantido para admin (modo público agora usa tenant['pode_operar'])."""
-    hoje = date.today()
-    paid_until = parse_date_iso(tenant.get("paid_until"))
-    if not paid_until:
-        return False
-    return paid_until >= hoje
 
 # ============================================================
 # PREÇOS / SINAL FIXO
@@ -203,6 +187,16 @@ def fn_headers():
         "Authorization": f"Bearer {SUPABASE_ANON_KEY}",
     }
 
+def assert_edge_config():
+    missing = []
+    if not URL_TENANT_PUBLIC: missing.append("URL_TENANT_PUBLIC")
+    if not URL_RESERVAR: missing.append("URL_RESERVAR")
+    if not URL_HORARIOS: missing.append("URL_HORARIOS")
+    if missing:
+        st.error("Configuração incompleta no secrets.")
+        st.code({"missing": missing})
+        st.stop()
+
 # ============================================================
 # ROUTING: PUBLIC vs ADMIN
 # ============================================================
@@ -279,44 +273,23 @@ def salvar_profile(access_token: str, dados: dict):
 # ============================================================
 def carregar_tenant_publico(tenant_id: str) -> dict | None:
     """Carrega tenant via Edge Function tenant-public.
-    IMPORTANTE: retorna o tenant mesmo quando ok=false (bloqueado),
+    Retorna o tenant mesmo quando ok=false (bloqueado),
     para a UI exibir a tela de assinatura.
     """
-    if URL_TENANT_PUBLIC:
-        try:
-            resp = requests.post(
-                URL_TENANT_PUBLIC,
-                headers=fn_headers(),
-                json={"tenant_id": str(tenant_id)},
-                timeout=12
-            )
-            if resp.status_code != 200:
-                return None
-
-            payload = resp.json()
-            if isinstance(payload, dict) and isinstance(payload.get("tenant"), dict):
-                return payload["tenant"]
-            return None
-        except Exception:
-            return None
-
-    # ⚠️ fallback (não ideal): service role no app
-    sb = sb_service()
-    if not sb:
-        return None
-
+    assert_edge_config()
     try:
-        resp = (
-            sb.table("tenants")
-            .select("id,nome,ativo,paid_until,billing_status,whatsapp_numero,pix_chave,pix_nome,pix_cidade,whatsapp")
-            .eq("id", tenant_id)
-            .limit(1)
-            .execute()
+        resp = requests.post(
+            URL_TENANT_PUBLIC,
+            headers=fn_headers(),
+            json={"tenant_id": str(tenant_id)},
+            timeout=12
         )
-        if resp.data:
-            t = resp.data[0]
-            t["pode_operar"] = bool(t.get("ativo", True)) and is_tenant_pago(t) and (t.get("billing_status", "active") == "active")
-            return t
+        if resp.status_code != 200:
+            return None
+
+        payload = resp.json()
+        if isinstance(payload, dict) and isinstance(payload.get("tenant"), dict):
+            return payload["tenant"]
         return None
     except Exception:
         return None
@@ -336,57 +309,37 @@ def carregar_tenant_admin(access_token: str) -> dict | None:
         return None
 
 def criar_tenant_se_nao_existir(access_token: str) -> dict | None:
-    """Cria um tenant para o usuário logado (caso ainda não exista)."""
+    """Cria um tenant para o usuário logado (somente via Edge Function)."""
     user = get_auth_user(access_token)
     if not user:
         return {"ok": False, "error": "user_not_found"}
 
-    # 1) via Edge Function (recomendado)
-    if URL_CREATE_TENANT:
-        try:
-            resp = requests.post(
-                URL_CREATE_TENANT,
-                headers=fn_headers(),
-                json={"user_id": str(user.id), "email": str(user.email or "")},
-                timeout=12
-            )
-            if resp.status_code != 200:
-                return {"ok": False, "error": f"edge_http_{resp.status_code}", "details": resp.text}
-            payload = resp.json()
-            if isinstance(payload, dict) and payload.get("ok"):
-                return payload
-            return {"ok": False, "error": "edge_payload_invalid", "details": payload}
-        except Exception as e:
-            return {"ok": False, "error": "edge_exception", "details": str(e)}
+    if not URL_CREATE_TENANT:
+        return {"ok": False, "error": "missing_URL_CREATE_TENANT"}
 
-    # 2) fallback: insert direto (evite em produção)
     try:
-        sb = sb_user(access_token)
-        paid_until = (date.today() + timedelta(days=int(TRIAL_DIAS))).isoformat()
-
-        resp = (
-            sb.table("tenants")
-            .insert({
-                "owner_user_id": str(user.id),
-                "nome": "Minha loja",
-                "ativo": True,
-                "billing_status": "trial",
-                "paid_until": paid_until,
-            })
-            .select("id")
-            .single()
-            .execute()
+        resp = requests.post(
+            URL_CREATE_TENANT,
+            headers=fn_headers(),
+            json={"user_id": str(user.id)},
+            timeout=12
         )
+        if resp.status_code != 200:
+            return {"ok": False, "error": f"edge_http_{resp.status_code}", "details": resp.text}
 
-        tenant_id = resp.data.get("id") if resp and isinstance(resp.data, dict) else None
-        return {"ok": True, "tenant_id": tenant_id}
+        payload = resp.json()
+        if isinstance(payload, dict) and payload.get("ok"):
+            return payload
+
+        return {"ok": False, "error": "edge_payload_invalid", "details": payload}
     except Exception as e:
-        return {"ok": False, "error": "insert_exception", "details": str(e)}
+        return {"ok": False, "error": "edge_exception", "details": str(e)}
 
 # ============================================================
 # PUBLIC: HORÁRIOS OCUPADOS + RESERVA
 # ============================================================
 def horarios_ocupados_publico(tenant_id: str, data_escolhida: date) -> set[str]:
+    assert_edge_config()
     try:
         resp = requests.post(
             URL_HORARIOS,
@@ -436,6 +389,7 @@ def inserir_pre_agendamento_publico(
     servicos: list[str],
     valor_sinal: float
 ) -> dict | None:
+    assert_edge_config()
     payload = {
         "tenant_id": str(tenant_id),
         "cliente": cliente.strip(),
@@ -627,7 +581,7 @@ def tela_publica():
 
         st.stop()
 
-    whatsapp_num = (tenant.get("whatsapp_numero") or tenant.get("whatsapp") or "").strip()
+    whatsapp_num = (tenant.get("whatsapp_numero") or "").strip()
     pix_chave = (tenant.get("pix_chave") or "").strip()
     pix_nome = (tenant.get("pix_nome") or "Profissional").strip()
     pix_cidade = (tenant.get("pix_cidade") or "BRASIL").strip()
@@ -777,12 +731,11 @@ def tela_publica():
                 st.image(img_bytes, use_container_width=True)
 
 # ============================================================
-# UI: MODO ADMIN (corrigido)
+# UI: MODO ADMIN
 # ============================================================
 def tela_admin():
     st.subheader("Área da Profissional 🔐")
 
-    # 1) Se não está logado, mostra login/cadastro e para
     if not st.session_state.access_token:
         tab1, tab2 = st.tabs(["Entrar", "Criar conta"])
 
@@ -811,7 +764,6 @@ def tela_admin():
 
         st.stop()
 
-    # 2) Já está logado
     access_token = st.session_state.access_token
     user = get_auth_user(access_token)
     if not user:
@@ -819,7 +771,6 @@ def tela_admin():
         auth_logout()
         st.stop()
 
-    # 3) Tenant
     tenant = carregar_tenant_admin(access_token)
     if not tenant:
         st.warning("Você ainda não tem um tenant (loja) criado para esse usuário.")
@@ -829,7 +780,7 @@ def tela_admin():
 
         if not out or (isinstance(out, dict) and out.get("ok") is False):
             st.error("Falhou ao criar tenant automaticamente.")
-            st.info("Abra Supabase → Edge Functions → create-tenant → Invocations/Logs e veja o erro.")
+            st.info("Verifique a Edge Function create-tenant e o SQL (unique owner_user_id).")
             if isinstance(out, dict):
                 st.code(out)
             st.stop()
@@ -844,11 +795,17 @@ def tela_admin():
 
     tenant_id = str(tenant.get("id"))
 
-    # 4) Bloqueio SaaS no ADMIN (opcional, mas recomendado)
-    if (tenant.get("ativo") is False) or (not is_tenant_pago(tenant)) or (tenant.get("billing_status") not in (None, "active", "trial")):
+    # (Opcional) Bloqueio no ADMIN: você pode manter ou remover.
+    # Aqui mantive igual seu app: se não estiver ativo/pago, bloqueia.
+    paid_until = parse_date_iso(tenant.get("paid_until"))
+    hoje = date.today()
+    pago = bool(paid_until and paid_until >= hoje)
+    ativo = (tenant.get("ativo") is not False)
+    billing_ok = (tenant.get("billing_status") in (None, "active", "trial"))
+
+    if (not ativo) or (not pago) or (not billing_ok):
         st.error("🔒 Assinatura mensal pendente")
 
-        paid_until = parse_date_iso(tenant.get("paid_until"))
         if paid_until:
             st.caption(f"Venceu em **{paid_until.strftime('%d/%m/%Y')}**.")
         else:
@@ -877,7 +834,6 @@ def tela_admin():
 
     st.success(f"Acesso liberado ✅ • Loja: **{tenant.get('nome','Minha loja')}**")
 
-    # 5) Link público
     colA, colB = st.columns([1, 1])
     with colA:
         if st.button("Sair"):
@@ -889,7 +845,6 @@ def tela_admin():
 
     st.divider()
 
-    # 6) Perfil
     st.subheader("👩‍💼 Meu perfil")
     profile = carregar_profile(access_token)
     if not profile:
