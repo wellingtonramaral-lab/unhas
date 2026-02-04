@@ -1214,7 +1214,21 @@ def tela_admin():
     df_show = df_filtrado.drop(columns=["Data_dt"]).copy()
     df_show["Preço do serviço"] = df_show["Preço do serviço"].apply(lambda v: fmt_brl(float(v)))
     df_show["Sinal"] = df_show["Sinal"].apply(lambda v: fmt_brl(float(v)))
-    st.dataframe(df_show.drop(columns=["id"]), use_container_width=True)
+    st.dataframe(
+    df_show.drop(columns=["id"]),
+    use_container_width=True,
+    height=360  # <- importante: não deixa a tabela "tomar" o scroll da página
+)
+
+st.divider()
+st.subheader("Ações rápidas")
+
+st.subheader("✅ Marcar como PAGO")
+# ... seu código de pagar
+
+st.subheader("🗑️ Excluir")
+# ... seu código de excluir
+
 
 # ============================================================
 # ROUTER
