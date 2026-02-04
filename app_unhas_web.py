@@ -908,7 +908,6 @@ def tela_admin():
 
     menu_topo_comandos(access_token, tenant_id)
 
-    drawer_configuracoes_perfil(access_token)
 
     # 4) Bloqueio SaaS no ADMIN
     paid_until = parse_date_iso(tenant.get("paid_until"))
