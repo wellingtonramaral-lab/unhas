@@ -550,13 +550,48 @@ def montar_mensagem_pagamento_cliente(
 # UI: Drawer de Configurações (Engrenagem)
 # ============================================================
 def drawer_configuracoes_perfil(access_token: str):
-    left, right = st.columns([10, 1])
-    with left:
-        st.subheader("Área da Profissional 🔐")
-    with right:
-        if st.button("⚙️", key="btn_settings_top", help="Configurações do perfil"):
-            st.session_state.show_settings = not st.session_state.show_settings
+    # --- CSS para deixar o botão ⚙️ fixo no topo esquerdo ---
+    st.markdown(
+        """
+        <style>
+        /* Pega o stButton logo depois do nosso anchor e fixa na tela */
+        #gear-anchor + div[data-testid="stButton"]{
+            position: fixed;
+            top: 12px;
+            left: 12px;
+            z-index: 9999;
+            margin: 0 !important;
+        }
 
+        /* Ajuste visual do botão */
+        #gear-anchor + div[data-testid="stButton"] button{
+            width: 44px;
+            height: 44px;
+            border-radius: 12px;
+            font-size: 18px;
+            padding: 0;
+        }
+
+        /* Dá um respiro no topo pra não ficar tudo escondido atrás da engrenagem */
+        .block-container{
+            padding-top: 2.2rem;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True
+    )
+
+    # Cabeçalho normal do admin (sem engrenagem aqui)
+    st.subheader("Área da Profissional 🔐")
+
+    # Âncora usada pelo CSS pra fixar o próximo botão
+    st.markdown('<div id="gear-anchor"></div>', unsafe_allow_html=True)
+
+    # Botão engrenagem FIXO
+    if st.button("⚙️", key="btn_settings_top", help="Configurações do perfil"):
+        st.session_state.show_settings = not st.session_state.show_settings
+
+    # Drawer de configurações
     if st.session_state.show_settings:
         with st.container(border=True):
             st.markdown("### ⚙️ Configurações do perfil")
@@ -573,6 +608,7 @@ def drawer_configuracoes_perfil(access_token: str):
             pix_cidade = st.text_input("Cidade do Pix", value=profile.get("pix_cidade") or "", key="set_pix_cidade")
 
             col1, col2 = st.columns([1, 1])
+
             with col1:
                 if st.button("💾 Salvar", use_container_width=True, key="btn_save_profile_drawer"):
                     salvar_profile(
