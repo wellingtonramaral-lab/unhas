@@ -51,69 +51,31 @@ SAAS_SUPORTE_WHATSAPP = st.secrets.get("SAAS_SUPORTE_WHATSAPP", "").strip()
 def menu_topo_comandos(access_token: str, tenant_id: str):
     if "show_profile" not in st.session_state:
         st.session_state.show_profile = False
+    if "show_copy" not in st.session_state:
+        st.session_state.show_copy = False
 
     base = PUBLIC_APP_BASE_URL or "https://SEUAPP.streamlit.app"
     link_cliente = f"{base}/?t={tenant_id}"
 
-    # --- CSS: fixa o bloco no topo (central) ---
-    st.markdown(
-        """
-        <style>
-        #menu-anchor + div[data-testid="stHorizontalBlock"]{
-            position: fixed;
-            top: 12px;
-            left: 50%;
-            transform: translateX(-50%);
-            z-index: 99999;
-            background: rgba(0,0,0,0.30);
-            backdrop-filter: blur(8px);
-            padding: 10px;
-            border-radius: 16px;
-            border: 1px solid rgba(255,255,255,0.10);
-            width: min(520px, calc(100vw - 24px));
-        }
-        .block-container{ padding-top: 90px; }
-        </style>
-        """,
-        unsafe_allow_html=True
-    )
+    # Botão "Menu" e itens dentro
+    with st.expander("☰ Menu", expanded=False):
 
-    # Âncora: o CSS fixa o bloco logo depois
-    st.markdown('<div id="menu-anchor"></div>', unsafe_allow_html=True)
+    # Mostra área de copiar (fora do popover, mais estável)
+    if st.session_state.show_copy:
+        with st.container(border=True):
+            st.markdown("### 🔗 Link do cliente")
+            st.text_input("Copie o link abaixo", value=link_cliente, key="link_cliente_input")
+            st.caption("Dica: clique no campo, depois Ctrl+C (ou no celular: segure e copie).")
 
-    # Linha superior: 1 botão "Menu"
-    col = st.columns([1])[0]
-    with col:
-        with st.popover("☰ Menu", use_container_width=True):
-            if st.button("👤 Meu perfil", use_container_width=True, key="btn_menu_meu_perfil"):
-                st.session_state.show_profile = True
+            col1, col2 = st.columns([1, 1])
+            with col1:
+                st.code(link_cliente)
+            with col2:
+                if st.button("Fechar", use_container_width=True, key="btn_close_copy"):
+                    st.session_state.show_copy = False
+                    st.rerun()
 
-            # copiar com JS (funciona no browser)
-            st.markdown(
-                f"""
-                <button onclick="
-                    navigator.clipboard.writeText('{link_cliente}');
-                    const el=document.getElementById('copyStatus');
-                    if(el){{ el.innerText='✅ Link copiado!'; setTimeout(()=>el.innerText='',2000); }}
-                " style="
-                    width:100%;
-                    padding:10px 14px;
-                    border-radius:12px;
-                    border:1px solid rgba(255,255,255,0.12);
-                    background: rgba(20,20,20,0.75);
-                    color: #fff;
-                    font-weight: 600;
-                    cursor: pointer;
-                    margin-top: 8px;
-                ">
-                    🔗 Copiar link do cliente
-                </button>
-                <div id="copyStatus" style="margin-top:8px; font-weight:600;"></div>
-                """,
-                unsafe_allow_html=True
-            )
-
-    # Painel do perfil abre abaixo quando clicar
+    # Drawer do perfil
     if st.session_state.show_profile:
         with st.container(border=True):
             st.markdown("### 👤 Meu perfil")
@@ -146,6 +108,7 @@ def menu_topo_comandos(access_token: str, tenant_id: str):
                 if st.button("Fechar", use_container_width=True, key="btn_close_profile"):
                     st.session_state.show_profile = False
                     st.rerun()
+
 
 
 # ============================================================
