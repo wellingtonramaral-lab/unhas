@@ -131,8 +131,43 @@ def apply_theme():
             border-radius: 999px;
             background: rgba(255,255,255,.03);
             color: var(--muted);
-            font-size: 0.9rem;
+            font-size: 0.9rem;}
+            /* ===============================
+             FIX iOS / SAFARI INPUTS
+             =============================== */
+
+            /* Força fundo escuro mesmo com autofill */
+        input,
+        textarea,
+        .stTextInput input,
+        .stTextInput textarea {
+          background-color: rgba(15, 23, 42, 0.95) !important;
+          color: #FFFFFF !important;
+          -webkit-text-fill-color: #FFFFFF !important;
+          caret-color: #FFFFFF !important;
         }
+
+            /* Remove fundo branco do autofill (Safari / iOS) */
+        input:-webkit-autofill,
+        textarea:-webkit-autofill {
+            -webkit-box-shadow: 0 0 0px 1000px rgba(15, 23, 42, 0.95) inset !important;
+            box-shadow: 0 0 0px 1000px rgba(15, 23, 42, 0.95) inset !important;
+         -webkit-text-fill-color: #FFFFFF !important;
+         caret-color: #FFFFFF !important;
+        }
+
+            /* Placeholder legível */
+        ::placeholder {
+          color: rgba(255, 255, 255, 0.55) !important;
+        }
+
+            /* Remove highlight branco ao focar */
+        input:focus,
+        textarea:focus {
+          outline: none !important;
+            box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.45) !important;
+        }
+
         .chip b{ color: var(--text); }
         </style>
         """,
