@@ -549,52 +549,74 @@ def montar_mensagem_pagamento_cliente(
 # ============================================================
 # UI: Drawer de Configurações (Engrenagem)
 # ============================================================
-def drawer_configuracoes_perfil(access_token: str):
-    # --- CSS para deixar o botão ⚙️ fixo no topo esquerdo ---
+def menu_topo_comandos(access_token: str, tenant_id: str):
+    # Estado
+    if "show_profile" not in st.session_state:
+        st.session_state.show_profile = False
+
+    base = PUBLIC_APP_BASE_URL or "https://SEUAPP.streamlit.app"
+    link_cliente = f"{base}/?t={tenant_id}"
+
+    # CSS: menu fixo no topo esquerdo
     st.markdown(
         """
         <style>
-        /* Pega o stButton logo depois do nosso anchor e fixa na tela */
-        #gear-anchor + div[data-testid="stButton"]{
+        #cmd-anchor + div[data-testid="stHorizontalBlock"]{
             position: fixed;
             top: 12px;
             left: 12px;
             z-index: 9999;
-            margin: 0 !important;
+            background: rgba(0,0,0,0.20);
+            backdrop-filter: blur(6px);
+            padding: 8px;
+            border-radius: 14px;
         }
-
-        /* Ajuste visual do botão */
-        #gear-anchor + div[data-testid="stButton"] button{
-            width: 44px;
-            height: 44px;
-            border-radius: 12px;
-            font-size: 18px;
-            padding: 0;
-        }
-
-        /* Dá um respiro no topo pra não ficar tudo escondido atrás da engrenagem */
-        .block-container{
-            padding-top: 2.2rem;
-        }
+        .block-container{ padding-top: 3.2rem; }
         </style>
         """,
         unsafe_allow_html=True
     )
 
-    # Cabeçalho normal do admin (sem engrenagem aqui)
-    st.subheader("Área da Profissional 🔐")
+    # Âncora pro CSS
+    st.markdown('<div id="cmd-anchor"></div>', unsafe_allow_html=True)
 
-    # Âncora usada pelo CSS pra fixar o próximo botão
-    st.markdown('<div id="gear-anchor"></div>', unsafe_allow_html=True)
+    # Dois botões (lado a lado)
+    c1, c2 = st.columns([1, 1])
+    with c1:
+        if st.button("👤 Meu perfil", use_container_width=True, key="btn_meu_perfil"):
+            st.session_state.show_profile = not st.session_state.show_profile
+    with c2:
+        if st.button("🔗 Copiar link do cliente", use_container_width=True, key="btn_copy_link"):
+            # Mostra um "copiador" com JS (funciona no browser)
+            st.session_state._show_copy_box = True
 
-    # Botão engrenagem FIXO
-    if st.button("⚙️", key="btn_settings_top", help="Configurações do perfil"):
-        st.session_state.show_settings = not st.session_state.show_settings
+    # Caixa de copiar (com JS real)
+    if st.session_state.get("_show_copy_box", False):
+        st.markdown("##### Link do cliente")
+        st.markdown(
+            f"""
+            <div style="display:flex; gap:8px; align-items:center;">
+              <input id="clientLink" value="{link_cliente}" style="width:100%; padding:10px; border-radius:10px; border:1px solid #444; background:#111; color:#fff;" readonly />
+              <button onclick="
+                const el=document.getElementById('clientLink');
+                el.select();
+                el.setSelectionRange(0, 99999);
+                navigator.clipboard.writeText(el.value);
+              " style="padding:10px 14px; border-radius:10px; border:1px solid #444; background:#222; color:#fff; cursor:pointer;">
+                Copiar
+              </button>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+        if st.button("Fechar", key="btn_close_copy_box"):
+            st.session_state._show_copy_box = False
+            st.rerun()
 
-    # Drawer de configurações
-    if st.session_state.show_settings:
+    # Drawer do perfil (abre com "Meu perfil")
+    if st.session_state.show_profile:
         with st.container(border=True):
-            st.markdown("### ⚙️ Configurações do perfil")
+            st.markdown("### 👤 Meu perfil")
 
             profile = carregar_profile(access_token)
             if not profile:
@@ -608,9 +630,8 @@ def drawer_configuracoes_perfil(access_token: str):
             pix_cidade = st.text_input("Cidade do Pix", value=profile.get("pix_cidade") or "", key="set_pix_cidade")
 
             col1, col2 = st.columns([1, 1])
-
             with col1:
-                if st.button("💾 Salvar", use_container_width=True, key="btn_save_profile_drawer"):
+                if st.button("💾 Salvar", use_container_width=True, key="btn_save_profile"):
                     salvar_profile(
                         access_token,
                         {
@@ -621,13 +642,12 @@ def drawer_configuracoes_perfil(access_token: str):
                             "pix_cidade": pix_cidade.strip(),
                         }
                     )
-                    st.success("Perfil atualizado com sucesso!")
-                    st.session_state.show_settings = False
+                    st.success("Perfil atualizado!")
+                    st.session_state.show_profile = False
                     st.rerun()
-
             with col2:
-                if st.button("Fechar", use_container_width=True, key="btn_close_profile_drawer"):
-                    st.session_state.show_settings = False
+                if st.button("Fechar", use_container_width=True, key="btn_close_profile"):
+                    st.session_state.show_profile = False
                     st.rerun()
 
 # ============================================================
@@ -888,6 +908,8 @@ def tela_admin():
 
     tenant_id = str(tenant.get("id"))
 
+    menu_topo_comandos(access_token, tenant_id)
+
     # 4) Bloqueio SaaS no ADMIN
     paid_until = parse_date_iso(tenant.get("paid_until"))
     hoje = date.today()
@@ -925,16 +947,6 @@ def tela_admin():
         st.stop()
 
     st.success(f"Acesso liberado ✅ • Loja: **{tenant.get('nome','Minha loja')}**")
-
-    # 5) Link público + sair
-    colA, colB = st.columns([1, 1])
-    with colA:
-        if st.button("Sair"):
-            auth_logout()
-    with colB:
-        base = PUBLIC_APP_BASE_URL or "https://SEUAPP.streamlit.app"
-        st.caption("Seu link para clientes:")
-        st.code(f"{base}/?t={tenant_id}")
 
     atualizar_finalizados_admin(access_token, tenant_id)
 
