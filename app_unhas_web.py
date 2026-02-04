@@ -1222,7 +1222,8 @@ def tela_admin():
     st.dataframe(
     df_show.drop(columns=["id"]),
     use_container_width=True,
-    height=360  # <- importante: não deixa a tabela "tomar" o scroll da página)
+    height=360  # <- importante: não deixa a tabela "tomar" o scroll da página
+    )
     st.subheader("✅ Marcar como PAGO")
 
     ag_pagar = st.selectbox(
