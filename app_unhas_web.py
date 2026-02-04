@@ -57,57 +57,41 @@ def menu_topo_comandos(access_token: str, tenant_id: str):
     base = PUBLIC_APP_BASE_URL or "https://SEUAPP.streamlit.app"
     link_cliente = f"{base}/?t={tenant_id}"
 
-    # CSS para um "menu fixo"
+    # CSS: fixa o bloco de botões no topo esquerdo
     st.markdown(
         """
         <style>
-        .fixed-menu {
+        #fixed-menu-anchor + div[data-testid="stHorizontalBlock"]{
             position: fixed;
             top: 12px;
             left: 12px;
             z-index: 9999;
-            display: flex;
-            gap: 10px;
-            padding: 8px;
-            border-radius: 14px;
             background: rgba(0,0,0,0.25);
             backdrop-filter: blur(6px);
+            padding: 10px;
+            border-radius: 14px;
+            width: 520px;
+            max-width: calc(100vw - 24px);
         }
-        .fixed-menu-spacer {
-            height: 64px; /* empurra o conteúdo para não ficar atrás */
-        }
+        .block-container{ padding-top: 90px; }
         </style>
         """,
         unsafe_allow_html=True
     )
 
-    # Renderiza "barra" fixa (visual)
-    st.markdown(
-        """
-        <div class="fixed-menu">
-          <div style="color:white; font-weight:600; padding:10px 12px; border:1px solid rgba(255,255,255,0.12); border-radius:12px;">
-            👤 Meu perfil
-          </div>
-          <div style="color:white; font-weight:600; padding:10px 12px; border:1px solid rgba(255,255,255,0.12); border-radius:12px;">
-            🔗 Copiar link do cliente
-          </div>
-        </div>
-        <div class="fixed-menu-spacer"></div>
-        """,
-        unsafe_allow_html=True
-    )
+    # âncora (o CSS fixa o bloco logo depois)
+    st.markdown('<div id="fixed-menu-anchor"></div>', unsafe_allow_html=True)
 
-    # Botões reais (funcionais) logo abaixo — ficam sempre no topo do conteúdo
+    # ✅ Botões reais (este bloco inteiro será fixado)
     c1, c2 = st.columns([1, 1])
     with c1:
         if st.button("👤 Meu perfil", use_container_width=True, key="btn_meu_perfil"):
             st.session_state.show_profile = not st.session_state.show_profile
-
     with c2:
         if st.button("🔗 Copiar link do cliente", use_container_width=True, key="btn_copy_link"):
             st.session_state._show_copy_box = True
 
-    # Copiar link (com JS real)
+    # Copiar link (JS)
     if st.session_state._show_copy_box:
         st.markdown("##### Link do cliente")
         st.markdown(
@@ -116,8 +100,7 @@ def menu_topo_comandos(access_token: str, tenant_id: str):
               <input id="clientLink" value="{link_cliente}" style="width:100%; padding:10px; border-radius:10px; border:1px solid #444; background:#111; color:#fff;" readonly />
               <button onclick="
                 const el=document.getElementById('clientLink');
-                el.select();
-                el.setSelectionRange(0, 99999);
+                el.select(); el.setSelectionRange(0, 99999);
                 navigator.clipboard.writeText(el.value);
               " style="padding:10px 14px; border-radius:10px; border:1px solid #444; background:#222; color:#fff; cursor:pointer;">
                 Copiar
@@ -130,7 +113,7 @@ def menu_topo_comandos(access_token: str, tenant_id: str):
             st.session_state._show_copy_box = False
             st.rerun()
 
-    # Drawer do perfil
+    # Perfil
     if st.session_state.show_profile:
         with st.container(border=True):
             st.markdown("### 👤 Meu perfil")
@@ -149,16 +132,13 @@ def menu_topo_comandos(access_token: str, tenant_id: str):
             col1, col2 = st.columns([1, 1])
             with col1:
                 if st.button("💾 Salvar", use_container_width=True, key="btn_save_profile"):
-                    salvar_profile(
-                        access_token,
-                        {
-                            "nome": nome.strip(),
-                            "whatsapp": whatsapp.strip(),
-                            "pix_chave": pix_chave.strip(),
-                            "pix_nome": pix_nome.strip(),
-                            "pix_cidade": pix_cidade.strip(),
-                        }
-                    )
+                    salvar_profile(access_token, {
+                        "nome": nome.strip(),
+                        "whatsapp": whatsapp.strip(),
+                        "pix_chave": pix_chave.strip(),
+                        "pix_nome": pix_nome.strip(),
+                        "pix_cidade": pix_cidade.strip(),
+                    })
                     st.success("Perfil atualizado!")
                     st.session_state.show_profile = False
                     st.rerun()
