@@ -680,8 +680,15 @@ def atualizar_finalizados_admin(access_token: str, tenant_id: str):
 # WHATSAPP
 # ============================================================
 def montar_link_whatsapp(whatsapp_numero: str, texto: str):
+    num = "".join([c for c in str(whatsapp_numero or "") if c.isdigit()])
+
+    # se não tiver DDI, assume Brasil 55
+    if num and not num.startswith("55"):
+        if len(num) in (10, 11):  # celular BR
+            num = "55" + num
+
     text_encoded = urllib.parse.quote(texto, safe="")
-    return f"https://wa.me/{whatsapp_numero}?text={text_encoded}"
+    return f"https://wa.me/{num}?text={text_encoded}"
 
 def montar_mensagem_pagamento_cliente(
     nome,
@@ -953,6 +960,10 @@ def tela_publica():
     if not tenant:
         st.error("Este link não é válido, não existe ou não está público ainda.")
         st.stop()
+
+    if not whatsapp_num or len("".join([c for c in whatsapp_num if c.isdigit()])) < 10:
+    st.error("WhatsApp do profissional inválido. Peça para ele configurar no painel.")
+    st.stop()
 
     nome_raw = (tenant.get("nome") or "").strip()
     if not nome_raw or nome_raw.lower() in ("minha loja", "minha agenda"):
