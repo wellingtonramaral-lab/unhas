@@ -1389,48 +1389,48 @@ def tela_admin():
     st.subheader("💳 Renovação de plano")
 
     if st.button("➕ Adicionar 30 dias"):
-        nova_data = renovar_plano_admin(access_token, tenant_id, dias=30)
-        st.success(f"Plano renovado até **{nova_data.strftime('%d/%m/%Y')}**")
-        st.rerun()
-    st.divider()
-st.subheader("💳 Assinatura")
+            nova_data = renovar_plano_admin(access_token, tenant_id, dias=30)
+            st.success(f"Plano renovado até **{nova_data.strftime('%d/%m/%Y')}**")
+            st.rerun()
+            st.divider()
+    st.subheader("💳 Assinatura")
 
-st.markdown(f"""
-Plano mensal: **{SAAS_MENSAL_VALOR}**  
-Pagamento automático via Pix ou Cartão.
-""")
+    st.markdown(f"""
+    Plano mensal: **{SAAS_MENSAL_VALOR}**  
+    Pagamento automático via Pix ou Cartão.
+    """)
 
-if st.button("🚀 Assinar plano", type="primary", use_container_width=True):
-    try:
-        resp = requests.post(
-            st.secrets["URL_ASSINAR_PLANO"],
-            headers={
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {SUPABASE_ANON_KEY}",
-            },
-            json={
-                "tenant_id": tenant_id,
-                "email": user.email,
-            },
-            timeout=15,
-        )
-
-        data = resp.json()
-
-        if resp.status_code != 200 or not data.get("payment_url"):
-            st.error("Erro ao gerar pagamento.")
-            st.code(data)
-        else:
-            st.success("Redirecionando para pagamento…")
-            st.link_button(
-                "👉 Ir para pagamento",
-                data["payment_url"],
-                use_container_width=True,
+    if st.button("🚀 Assinar plano", type="primary", use_container_width=True):
+        try:
+            resp = requests.post(
+                st.secrets["URL_ASSINAR_PLANO"],
+                headers={
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {SUPABASE_ANON_KEY}",
+                },
+                json={
+                    "tenant_id": tenant_id,
+                    "email": user.email,
+                },
+                timeout=15,
             )
 
-    except Exception as e:
-        st.error("Falha ao iniciar assinatura.")
-        st.code(str(e))
+            data = resp.json()
+
+            if resp.status_code != 200 or not data.get("payment_url"):
+                st.error("Erro ao gerar pagamento.")
+                st.code(data)
+            else:
+                st.success("Redirecionando para pagamento…")
+                st.link_button(
+                    "👉 Ir para pagamento",
+                    data["payment_url"],
+                    use_container_width=True,
+                )
+
+        except Exception as e:
+            st.error("Falha ao iniciar assinatura.")
+            st.code(str(e))
 
 
 # ============================================================
