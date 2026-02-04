@@ -48,6 +48,126 @@ SAAS_PIX_CIDADE = st.secrets.get("SAAS_PIX_CIDADE", "BRASIL").strip()
 SAAS_MENSAL_VALOR = st.secrets.get("SAAS_MENSAL_VALOR", "R$ 39,90").strip()
 SAAS_SUPORTE_WHATSAPP = st.secrets.get("SAAS_SUPORTE_WHATSAPP", "").strip()
 
+def menu_topo_comandos(access_token: str, tenant_id: str):
+    if "show_profile" not in st.session_state:
+        st.session_state.show_profile = False
+    if "_show_copy_box" not in st.session_state:
+        st.session_state._show_copy_box = False
+
+    base = PUBLIC_APP_BASE_URL or "https://SEUAPP.streamlit.app"
+    link_cliente = f"{base}/?t={tenant_id}"
+
+    # CSS para um "menu fixo"
+    st.markdown(
+        """
+        <style>
+        .fixed-menu {
+            position: fixed;
+            top: 12px;
+            left: 12px;
+            z-index: 9999;
+            display: flex;
+            gap: 10px;
+            padding: 8px;
+            border-radius: 14px;
+            background: rgba(0,0,0,0.25);
+            backdrop-filter: blur(6px);
+        }
+        .fixed-menu-spacer {
+            height: 64px; /* empurra o conteúdo para não ficar atrás */
+        }
+        </style>
+        """,
+        unsafe_allow_html=True
+    )
+
+    # Renderiza "barra" fixa (visual)
+    st.markdown(
+        """
+        <div class="fixed-menu">
+          <div style="color:white; font-weight:600; padding:10px 12px; border:1px solid rgba(255,255,255,0.12); border-radius:12px;">
+            👤 Meu perfil
+          </div>
+          <div style="color:white; font-weight:600; padding:10px 12px; border:1px solid rgba(255,255,255,0.12); border-radius:12px;">
+            🔗 Copiar link do cliente
+          </div>
+        </div>
+        <div class="fixed-menu-spacer"></div>
+        """,
+        unsafe_allow_html=True
+    )
+
+    # Botões reais (funcionais) logo abaixo — ficam sempre no topo do conteúdo
+    c1, c2 = st.columns([1, 1])
+    with c1:
+        if st.button("👤 Meu perfil", use_container_width=True, key="btn_meu_perfil"):
+            st.session_state.show_profile = not st.session_state.show_profile
+
+    with c2:
+        if st.button("🔗 Copiar link do cliente", use_container_width=True, key="btn_copy_link"):
+            st.session_state._show_copy_box = True
+
+    # Copiar link (com JS real)
+    if st.session_state._show_copy_box:
+        st.markdown("##### Link do cliente")
+        st.markdown(
+            f"""
+            <div style="display:flex; gap:8px; align-items:center;">
+              <input id="clientLink" value="{link_cliente}" style="width:100%; padding:10px; border-radius:10px; border:1px solid #444; background:#111; color:#fff;" readonly />
+              <button onclick="
+                const el=document.getElementById('clientLink');
+                el.select();
+                el.setSelectionRange(0, 99999);
+                navigator.clipboard.writeText(el.value);
+              " style="padding:10px 14px; border-radius:10px; border:1px solid #444; background:#222; color:#fff; cursor:pointer;">
+                Copiar
+              </button>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+        if st.button("Fechar", key="btn_close_copy_box"):
+            st.session_state._show_copy_box = False
+            st.rerun()
+
+    # Drawer do perfil
+    if st.session_state.show_profile:
+        with st.container(border=True):
+            st.markdown("### 👤 Meu perfil")
+
+            profile = carregar_profile(access_token)
+            if not profile:
+                st.error("Não foi possível carregar seu perfil.")
+                return
+
+            nome = st.text_input("Nome da profissional", value=profile.get("nome") or "", key="set_nome")
+            whatsapp = st.text_input("WhatsApp (somente números)", value=profile.get("whatsapp") or "", key="set_whats")
+            pix_chave = st.text_input("Chave Pix", value=profile.get("pix_chave") or "", key="set_pix_chave")
+            pix_nome = st.text_input("Nome do Pix", value=profile.get("pix_nome") or "", key="set_pix_nome")
+            pix_cidade = st.text_input("Cidade do Pix", value=profile.get("pix_cidade") or "", key="set_pix_cidade")
+
+            col1, col2 = st.columns([1, 1])
+            with col1:
+                if st.button("💾 Salvar", use_container_width=True, key="btn_save_profile"):
+                    salvar_profile(
+                        access_token,
+                        {
+                            "nome": nome.strip(),
+                            "whatsapp": whatsapp.strip(),
+                            "pix_chave": pix_chave.strip(),
+                            "pix_nome": pix_nome.strip(),
+                            "pix_cidade": pix_cidade.strip(),
+                        }
+                    )
+                    st.success("Perfil atualizado!")
+                    st.session_state.show_profile = False
+                    st.rerun()
+            with col2:
+                if st.button("Fechar", use_container_width=True, key="btn_close_profile"):
+                    st.session_state.show_profile = False
+                    st.rerun()
+
+
 # ============================================================
 # SUPABASE CLIENTS
 # ============================================================
@@ -945,7 +1065,7 @@ def tela_admin():
             auth_logout()
         st.stop()
 
-    st.success(f"Acesso liberado ✅ • Loja: **{tenant.get('nome','Minha loja')}**")
+    st.success(f"Acesso liberado ✅ ")
 
     atualizar_finalizados_admin(access_token, tenant_id)
 
