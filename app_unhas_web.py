@@ -962,8 +962,8 @@ def tela_publica():
         st.stop()
 
     if not whatsapp_num or len("".join([c for c in whatsapp_num if c.isdigit()])) < 10:
-    st.error("WhatsApp do profissional inválido. Peça para ele configurar no painel.")
-    st.stop()
+      st.error("WhatsApp do profissional inválido. Peça para ele configurar no painel.")
+      st.stop()
 
     nome_raw = (tenant.get("nome") or "").strip()
     if not nome_raw or nome_raw.lower() in ("minha loja", "minha agenda"):
