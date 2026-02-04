@@ -18,10 +18,155 @@ except Exception:
     LOCAL_TZ = timezone(timedelta(hours=-3))
 
 # ============================================================
-# STREAMLIT CONFIG
+# STREAMLIT CONFIG + THEME (Agenda-Pro)
 # ============================================================
-st.set_page_config(page_title="Agendamento de Unhas 💅", layout="centered")
-st.title("💅 Agendamento de Unhas")
+st.set_page_config(
+    page_title="Agenda-Pro",
+    page_icon="📅",
+    layout="wide",
+    initial_sidebar_state="collapsed",
+)
+
+def apply_theme():
+    st.markdown(
+        """
+        <style>
+        :root{
+            --bg0: #070B12;
+            --bg1: #0B1220;
+            --card: rgba(255,255,255,.04);
+            --card2: rgba(255,255,255,.06);
+            --stroke: rgba(255,255,255,.10);
+            --stroke2: rgba(255,255,255,.16);
+            --text: rgba(255,255,255,.92);
+            --muted: rgba(255,255,255,.66);
+            --primary: #38BDF8;   /* azul claro */
+            --success: #22C55E;   /* verde */
+            --danger: #EF4444;
+            --shadow: 0 10px 30px rgba(0,0,0,.35);
+        }
+
+        /* Fundo geral */
+        .stApp{
+            background:
+              radial-gradient(1200px 600px at 10% 0%, rgba(56,189,248,.12), transparent 55%),
+              radial-gradient(1000px 520px at 80% 10%, rgba(34,197,94,.10), transparent 60%),
+              linear-gradient(180deg, var(--bg0), var(--bg1));
+            color: var(--text);
+        }
+
+        /* Conteúdo */
+        .block-container{
+            padding-top: 2.2rem;
+            padding-bottom: 2.8rem;
+            max-width: 1100px;
+        }
+
+        /* Tipografia */
+        h1, h2, h3{ letter-spacing: .2px; }
+        .muted{ color: var(--muted); }
+
+        /* Cards (container border=True) */
+        div[data-testid="stVerticalBlockBorderWrapper"]{
+            background: linear-gradient(180deg, var(--card), rgba(255,255,255,.02));
+            border: 1px solid var(--stroke);
+            border-radius: 18px;
+            box-shadow: var(--shadow);
+        }
+
+        /* Tabs */
+        button[data-baseweb="tab"]{
+            background: transparent !important;
+            color: var(--muted) !important;
+            border-radius: 14px !important;
+            padding: 10px 14px !important;
+        }
+        button[data-baseweb="tab"][aria-selected="true"]{
+            color: var(--text) !important;
+            border: 1px solid var(--stroke2) !important;
+            background: rgba(56,189,248,.08) !important;
+        }
+
+        /* Inputs */
+        input, textarea{
+            background: rgba(255,255,255,.04) !important;
+            border: 1px solid var(--stroke) !important;
+            color: var(--text) !important;
+            border-radius: 14px !important;
+        }
+
+        /* Botões (geral) */
+        .stButton > button, .stDownloadButton > button, .stLinkButton > a{
+            border-radius: 14px !important;
+            border: 1px solid var(--stroke2) !important;
+            background: rgba(255,255,255,.04) !important;
+            color: var(--text) !important;
+            padding: 0.65rem 0.9rem !important;
+            transition: all .15s ease-in-out;
+        }
+        .stButton > button:hover, .stDownloadButton > button:hover, .stLinkButton > a:hover{
+            transform: translateY(-1px);
+            border-color: rgba(56,189,248,.55) !important;
+            background: rgba(56,189,248,.10) !important;
+        }
+
+        /* Métricas */
+        div[data-testid="stMetric"]{
+            background: rgba(255,255,255,.03);
+            border: 1px solid var(--stroke);
+            border-radius: 16px;
+            padding: 14px 14px 10px 14px;
+        }
+
+        /* Expander (Menu) */
+        details{
+            background: rgba(255,255,255,.03) !important;
+            border: 1px solid var(--stroke) !important;
+            border-radius: 16px !important;
+            box-shadow: var(--shadow);
+        }
+        details summary{
+            padding: 12px 14px !important;
+            font-weight: 800 !important;
+            color: var(--text) !important;
+        }
+
+        /* Divider */
+        hr{ border-color: rgba(255,255,255,.10) !important; }
+
+        /* Badge chip */
+        .chip{
+            display: inline-flex;
+            gap: 8px;
+            align-items: center;
+            padding: 6px 10px;
+            border: 1px solid var(--stroke);
+            border-radius: 999px;
+            background: rgba(255,255,255,.03);
+            color: var(--muted);
+            font-size: 0.9rem;
+        }
+        .chip b{ color: var(--text); }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+apply_theme()
+
+# Hero (topo)
+st.markdown(
+    """
+    <div style="padding:14px 6px 10px 6px;">
+      <div class="chip">📌 <span>Agendamentos online para <b>qualquer profissional</b></span></div>
+      <h1 style="margin-top:10px;">📅 Agenda-Pro</h1>
+      <div class="muted" style="font-size:1.05rem; margin-top:4px;">
+        Organize seus atendimentos, compartilhe seu link e confirme reservas com facilidade.
+      </div>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
 
 # ============================================================
 # SECRETS
@@ -52,27 +197,26 @@ SAAS_SUPORTE_WHATSAPP = st.secrets.get("SAAS_SUPORTE_WHATSAPP", "").strip()
 # DEFAULTS (serviços + horários)
 # ============================================================
 DEFAULT_SERVICES = {
-    "Alongamento em Gel": 130.0,
-    "Manutenção – Gel": 100.0,
-    "Fibra de Vidro": 150.0,
-    "Manutenção – Fibra": 110.0,
+    # exemplos (cada profissional edita no menu)
+    "Corte de cabelo": 50.0,
+    "Barba": 30.0,
+    "Manicure": 40.0,
     "Pedicure": 50.0,
-    "Banho de Gel": 100.0,
+    "Tatuagem (pequena)": 150.0,
 }
 
 # weekday: 0=seg ... 6=dom
 DEFAULT_WORKING_HOURS = {
-    "0": ["18:00"],
-    "1": ["18:00"],
-    "2": ["18:00"],
-    "3": ["18:00"],
-    "4": ["18:00"],
-    "5": ["10:30", "14:00", "18:00"],
+    "0": ["09:00", "10:00", "15:00"],
+    "1": ["09:00", "10:00", "15:00"],
+    "2": ["09:00", "10:00", "15:00"],
+    "3": ["09:00", "10:00", "15:00"],
+    "4": ["09:00", "10:00", "15:00"],
+    "5": ["09:00", "10:00", "15:00"],
     "6": [],
 }
 
 VALOR_SINAL_FIXO = 20.0
-
 
 # ============================================================
 # SUPABASE CLIENTS
@@ -148,7 +292,8 @@ def calcular_sinal(_servicos):
 def validar_hhmm(h: str) -> bool:
     try:
         hh, mm = h.split(":")
-        hh = int(hh); mm = int(mm)
+        hh = int(hh)
+        mm = int(mm)
         return 0 <= hh <= 23 and 0 <= mm <= 59
     except Exception:
         return False
@@ -272,7 +417,6 @@ def salvar_profile(access_token: str, dados: dict):
 
 # ============================================================
 # TENANT SETTINGS (JSON em tenants.settings)
-# - Não quebra se coluna não existir: tenta e captura.
 # ============================================================
 def get_tenant_settings_admin(access_token: str, tenant_id: str):
     sb = sb_user(access_token)
@@ -292,13 +436,11 @@ def save_tenant_settings_admin(access_token: str, tenant_id: str, settings: dict
         sb.table("tenants").update({"settings": settings}).eq("id", tenant_id).execute()
         return True, ""
     except Exception as e:
-        # não quebra a app
         return False, str(e)
 
 def settings_get_services(settings: dict):
     s = settings.get("services")
     if isinstance(s, dict) and s:
-        # converte valores para float
         out = {}
         for k, v in s.items():
             try:
@@ -317,7 +459,6 @@ def settings_get_working_hours(settings: dict):
                 out[str(k)] = unique_sorted_times(v)
             else:
                 out[str(k)] = []
-        # garante todas as chaves
         for i in range(7):
             out.setdefault(str(i), DEFAULT_WORKING_HOURS.get(str(i), []))
         return out
@@ -426,7 +567,14 @@ def horarios_ocupados_publico(tenant_id: str, data_escolhida: date):
     except Exception:
         return set()
 
-def inserir_pre_agendamento_publico(tenant_id: str, cliente: str, data_escolhida: date, horario: str, servicos: list, valor_sinal: float):
+def inserir_pre_agendamento_publico(
+    tenant_id: str,
+    cliente: str,
+    data_escolhida: date,
+    horario: str,
+    servicos: list,
+    valor_sinal: float,
+):
     assert_edge_config()
     payload = {
         "tenant_id": str(tenant_id),
@@ -480,7 +628,15 @@ def listar_agendamentos_admin(access_token: str, tenant_id: str):
         return pd.DataFrame(columns=["id", "Cliente", "Data", "Horário", "Serviço(s)", "Status", "Sinal", "Criado em"])
 
     df.rename(
-        columns={"cliente": "Cliente", "data": "Data", "horario": "Horário", "servico": "Serviço(s)", "status": "Status", "valor": "Sinal", "created_at": "Criado em"},
+        columns={
+            "cliente": "Cliente",
+            "data": "Data",
+            "horario": "Horário",
+            "servico": "Serviço(s)",
+            "status": "Status",
+            "valor": "Sinal",
+            "created_at": "Criado em",
+        },
         inplace=True,
     )
     df["Data"] = df["Data"].astype(str)
@@ -526,24 +682,34 @@ def montar_link_whatsapp(whatsapp_numero: str, texto: str):
     text_encoded = urllib.parse.quote(texto, safe="")
     return f"https://wa.me/{whatsapp_numero}?text={text_encoded}"
 
-def montar_mensagem_pagamento_cliente(nome, data_atendimento: date, horario, servicos: list, valor_sinal: float, pix_chave: str, pix_nome: str, pix_cidade: str, services_map: dict):
+def montar_mensagem_pagamento_cliente(
+    nome,
+    data_atendimento: date,
+    horario,
+    servicos: list,
+    valor_sinal: float,
+    pix_chave: str,
+    pix_nome: str,
+    pix_cidade: str,
+    services_map: dict,
+):
     servs = normalizar_servicos(servicos)
     total = calcular_total_servicos(servs, services_map)
     lista = "\n".join([f"• {s} ({fmt_brl(services_map.get(s, 0.0))})" for s in servs]) if servs else "-"
     msg = (
-        "Olá! Quero reservar meu horário. 💅\n\n"
-        f"👩 Cliente: {nome}\n"
+        "Olá! Quero agendar um atendimento.\n\n"
+        f"👤 Cliente: {nome}\n"
         f"📅 Data: {data_atendimento.strftime('%d/%m/%Y')}\n"
         f"⏰ Horário: {horario}\n"
-        "💅 Serviço(s):\n"
+        "🧾 Serviço(s):\n"
         f"{lista}\n\n"
-        f"💰 Total dos serviços: {fmt_brl(total)}\n"
-        f"✅ Sinal para confirmar: {fmt_brl(valor_sinal)}\n\n"
+        f"💰 Total: {fmt_brl(total)}\n"
+        f"✅ Sinal: {fmt_brl(valor_sinal)}\n\n"
         "Pix para pagamento do sinal:\n"
         f"🔑 Chave Pix: {pix_chave}\n"
         f"👤 Nome: {pix_nome}\n"
         f"🏙️ Cidade: {pix_cidade}\n\n"
-        "📌 Assim que pagar, me envie o comprovante aqui para eu confirmar como PAGO. 🙏"
+        "📌 Após pagar, envie o comprovante aqui para eu confirmar como PAGO. 🙏"
     )
     return msg
 
@@ -594,7 +760,6 @@ def horarios_do_dia_com_settings(d: date, working_hours: dict):
 # MENU (expander) com 4 itens
 # ============================================================
 def menu_topo_comandos(access_token: str, tenant_id: str):
-    # carrega settings
     settings = get_tenant_settings_admin(access_token, tenant_id)
     services_map = settings_get_services(settings)
     working_hours = settings_get_working_hours(settings)
@@ -602,8 +767,9 @@ def menu_topo_comandos(access_token: str, tenant_id: str):
     base = PUBLIC_APP_BASE_URL or "https://SEUAPP.streamlit.app"
     link_cliente = f"{base}/?t={tenant_id}"
 
-    # MENU
-    with st.expander("☰ Menu", expanded=False):
+    with st.expander("☰ Menu rápido", expanded=False):
+        st.caption("Ações do seu painel (perfil, link, horários e serviços).")
+
         if st.button("👤 Meu perfil", use_container_width=True):
             st.session_state.show_profile = True
             st.session_state.show_copy = False
@@ -622,7 +788,7 @@ def menu_topo_comandos(access_token: str, tenant_id: str):
             st.session_state.show_copy = False
             st.session_state.show_services = False
 
-        if st.button("💅 Serviços e valores", use_container_width=True):
+        if st.button("🧾 Serviços e valores", use_container_width=True):
             st.session_state.show_services = True
             st.session_state.show_profile = False
             st.session_state.show_copy = False
@@ -647,7 +813,7 @@ def menu_topo_comandos(access_token: str, tenant_id: str):
                 st.error("Não foi possível carregar seu perfil.")
                 return
 
-            nome = st.text_input("Nome da profissional", value=profile.get("nome") or "")
+            nome = st.text_input("Nome do profissional", value=profile.get("nome") or "")
             whatsapp = st.text_input("WhatsApp (somente números)", value=profile.get("whatsapp") or "")
             pix_chave = st.text_input("Chave Pix", value=profile.get("pix_chave") or "")
             pix_nome = st.text_input("Nome do Pix", value=profile.get("pix_nome") or "")
@@ -655,14 +821,17 @@ def menu_topo_comandos(access_token: str, tenant_id: str):
 
             c1, c2 = st.columns(2)
             with c1:
-                if st.button("💾 Salvar", use_container_width=True):
-                    salvar_profile(access_token, {
-                        "nome": nome.strip(),
-                        "whatsapp": whatsapp.strip(),
-                        "pix_chave": pix_chave.strip(),
-                        "pix_nome": pix_nome.strip(),
-                        "pix_cidade": pix_cidade.strip(),
-                    })
+                if st.button("💾 Salvar", use_container_width=True, type="primary"):
+                    salvar_profile(
+                        access_token,
+                        {
+                            "nome": nome.strip(),
+                            "whatsapp": whatsapp.strip(),
+                            "pix_chave": pix_chave.strip(),
+                            "pix_nome": pix_nome.strip(),
+                            "pix_cidade": pix_cidade.strip(),
+                        },
+                    )
                     st.success("Perfil atualizado!")
                     st.session_state.show_profile = False
                     st.rerun()
@@ -675,7 +844,7 @@ def menu_topo_comandos(access_token: str, tenant_id: str):
     if st.session_state.show_hours:
         with st.container(border=True):
             st.markdown("### ⏰ Horário de trabalho")
-            st.caption("Digite horários no formato **HH:MM**, separados por vírgula. Ex: 10:30, 14:00, 18:00")
+            st.caption("Digite horários no formato **HH:MM**, separados por vírgula. Ex: 09:00, 10:00, 15:00")
 
             edited = {}
             invalids = []
@@ -697,7 +866,7 @@ def menu_topo_comandos(access_token: str, tenant_id: str):
 
             c1, c2 = st.columns(2)
             with c1:
-                if st.button("💾 Salvar horários", use_container_width=True):
+                if st.button("💾 Salvar horários", use_container_width=True, type="primary"):
                     if invalids:
                         st.error("Há horários inválidos. Corrija antes de salvar:")
                         st.code("\n".join(invalids))
@@ -709,7 +878,7 @@ def menu_topo_comandos(access_token: str, tenant_id: str):
                             st.session_state.show_hours = False
                             st.rerun()
                         else:
-                            st.warning("Não consegui salvar no banco (provável coluna tenants.settings não existe).")
+                            st.warning("Não consegui salvar no banco.")
                             st.code(msg)
             with c2:
                 if st.button("Fechar", use_container_width=True):
@@ -719,8 +888,8 @@ def menu_topo_comandos(access_token: str, tenant_id: str):
     # SERVIÇOS E VALORES
     if st.session_state.show_services:
         with st.container(border=True):
-            st.markdown("### 💅 Serviços e valores")
-            st.caption("Edite a lista e clique em salvar. Você pode adicionar linhas (dynamic).")
+            st.markdown("### 🧾 Serviços e valores")
+            st.caption("Edite a lista e clique em salvar. Você pode adicionar linhas (dinâmico).")
 
             df = pd.DataFrame([{"Servico": k, "Valor": float(v)} for k, v in services_map.items()])
             df = df.sort_values("Servico").reset_index(drop=True)
@@ -738,7 +907,7 @@ def menu_topo_comandos(access_token: str, tenant_id: str):
 
             c1, c2 = st.columns(2)
             with c1:
-                if st.button("💾 Salvar serviços", use_container_width=True):
+                if st.button("💾 Salvar serviços", use_container_width=True, type="primary"):
                     new_map = {}
                     errors = []
 
@@ -771,7 +940,7 @@ def menu_topo_comandos(access_token: str, tenant_id: str):
                             st.session_state.show_services = False
                             st.rerun()
                         else:
-                            st.warning("Não consegui salvar no banco (provável coluna tenants.settings não existe).")
+                            st.warning("Não consegui salvar no banco.")
                             st.code(msg)
 
             with c2:
@@ -786,11 +955,11 @@ def tela_publica():
     tenant = carregar_tenant_publico(PUBLIC_TENANT_ID)
     if not tenant:
         st.error("Este link não é válido, não existe ou não está público ainda.")
-        st.info("Se você é a profissional, acesse o link sem ?t= para entrar no painel.")
+        st.info("Se você é o profissional, acesse o link sem ?t= para entrar no painel.")
         st.stop()
 
     nome_prof = tenant.get("nome") or "Profissional"
-    st.caption(f"Agenda de: **{nome_prof}**")
+    st.markdown(f"<div class='muted' style='margin-top:6px;'>Agenda de: <b>{nome_prof}</b></div>", unsafe_allow_html=True)
 
     # backend retorna pode_operar
     if not tenant.get("pode_operar", False):
@@ -809,7 +978,7 @@ def tela_publica():
         )
 
         if SAAS_SUPORTE_WHATSAPP:
-            msg = f"Olá! Paguei a mensalidade. tenant_id: {tenant.get('id')} | Loja: {nome_prof}"
+            msg = f"Olá! Paguei a mensalidade. tenant_id: {tenant.get('id')} | Profissional: {nome_prof}"
             link = montar_link_whatsapp(SAAS_SUPORTE_WHATSAPP, msg)
             st.link_button("📲 Enviar comprovante no WhatsApp", link, use_container_width=True)
         st.stop()
@@ -820,25 +989,25 @@ def tela_publica():
     pix_cidade = (tenant.get("pix_cidade") or "BRASIL").strip()
 
     if not whatsapp_num:
-        st.warning("WhatsApp desta loja não configurado.")
+        st.warning("WhatsApp deste profissional não configurado.")
 
-    # tenta usar settings se o endpoint devolver, senão defaults
+    # usa settings se o endpoint devolver, senão defaults
     settings = tenant.get("settings") if isinstance(tenant.get("settings"), dict) else {}
     services_map = settings_get_services(settings)
     working_hours = settings_get_working_hours(settings)
 
-    aba_agendar, aba_catalogo = st.tabs(["💅 Agendamento", "📒 Catálogo"])
+    aba_agendar, aba_catalogo = st.tabs(["📅 Agendamento", "📒 Catálogo"])
 
     with aba_agendar:
-        st.subheader("Agende seu horário")
+        st.subheader("Agende seu atendimento")
 
-        nome = st.text_input("Nome da cliente")
+        nome = st.text_input("Seu nome")
         data_atendimento = st.date_input("Data do atendimento", min_value=date.today())
 
         servicos_escolhidos = st.multiselect(
-            "Tipo de serviço (pode escolher mais de um)",
+            "Escolha o serviço (pode selecionar mais de um)",
             options=list(services_map.keys()),
-            default=[]
+            default=[],
         )
         servicos_escolhidos = normalizar_servicos(servicos_escolhidos)
 
@@ -846,7 +1015,7 @@ def tela_publica():
         valor_sinal = calcular_sinal(servicos_escolhidos)
 
         if servicos_escolhidos:
-            st.caption(f"Total dos serviços: **{fmt_brl(total_servico)}** • Sinal: **{fmt_brl(valor_sinal)}**")
+            st.caption(f"Total: **{fmt_brl(total_servico)}** • Sinal: **{fmt_brl(valor_sinal)}**")
         else:
             st.caption(f"Sinal: **{fmt_brl(valor_sinal)}**")
 
@@ -871,7 +1040,12 @@ def tela_publica():
 
         left, right = st.columns([1.2, 1])
         with left:
-            reservar_click = st.button("💳 Reservar e pagar sinal", use_container_width=True, disabled=not pode_agendar)
+            reservar_click = st.button(
+                "💳 Reservar e pagar sinal",
+                use_container_width=True,
+                disabled=not pode_agendar,
+                type="primary",
+            )
         with right:
             if st.session_state.wa_link:
                 st.link_button("📲 Abrir WhatsApp", st.session_state.wa_link, use_container_width=True)
@@ -884,13 +1058,13 @@ def tela_publica():
             if not nome or not horario_escolhido or not servicos_escolhidos:
                 st.error("Preencha todos os campos e selecione pelo menos 1 serviço.")
             elif not whatsapp_num:
-                st.error("Esta loja ainda não configurou WhatsApp para receber a reserva.")
+                st.error("Este profissional ainda não configurou WhatsApp para receber a reserva.")
             else:
                 st.session_state.reservando = True
                 chave = make_reserva_key(nome, data_atendimento, horario_escolhido, servicos_escolhidos)
 
                 if st.session_state.ultima_chave_reserva == chave:
-                    st.warning("Você já enviou esse agendamento. Se quiser mudar, fale com a profissional.")
+                    st.warning("Você já enviou esse agendamento. Se quiser mudar, fale com o profissional.")
                     st.session_state.reservando = False
                 else:
                     if horario_escolhido in horarios_ocupados_publico(PUBLIC_TENANT_ID, data_atendimento):
@@ -903,7 +1077,7 @@ def tela_publica():
                             data_atendimento,
                             horario_escolhido,
                             servicos_escolhidos,
-                            valor_sinal
+                            valor_sinal,
                         )
                         if not resp:
                             st.session_state.reservando = False
@@ -917,7 +1091,7 @@ def tela_publica():
                                 pix_chave=pix_chave,
                                 pix_nome=pix_nome,
                                 pix_cidade=pix_cidade,
-                                services_map=services_map
+                                services_map=services_map,
                             )
                             st.session_state.wa_link = montar_link_whatsapp(whatsapp_num, mensagem)
                             st.session_state.ultima_chave_reserva = chave
@@ -926,18 +1100,26 @@ def tela_publica():
                             st.rerun()
 
     with aba_catalogo:
-        st.subheader("📒 Catálogo de Serviços")
+        st.subheader("📒 Catálogo")
+        st.caption("Opcional: você pode manter um catálogo PDF (serviços, fotos e informações).")
         try:
             with open(CATALOGO_PDF, "rb") as f:
                 st.download_button("⬇️ Baixar catálogo (PDF)", data=f, file_name="catalogo.pdf", mime="application/pdf")
         except FileNotFoundError:
-            st.error("Arquivo 'catalogo.pdf' não encontrado no repositório.")
+            st.info("Sem catálogo configurado. (Se quiser, adicione um arquivo `catalogo.pdf` no repositório.)")
         else:
             with st.spinner("Carregando catálogo..."):
                 paginas = pdf_para_imagens_com_fundo_branco(CATALOGO_PDF, zoom=2.0)
             for i, img_bytes in enumerate(paginas, start=1):
                 st.markdown(f"**Página {i}**")
                 st.image(img_bytes, use_container_width=True)
+
+    st.markdown(
+        "<div class='muted' style='text-align:center; margin-top:28px;'>"
+        "© Agenda-Pro • Agendamentos online para profissionais"
+        "</div>",
+        unsafe_allow_html=True,
+    )
 
 # ============================================================
 # UI: MODO ADMIN
@@ -949,7 +1131,7 @@ def tela_admin():
         with tab1:
             email = st.text_input("Email", key="login_email")
             password = st.text_input("Senha", type="password", key="login_pass")
-            if st.button("Entrar"):
+            if st.button("Entrar", type="primary"):
                 try:
                     res = auth_login(email, password)
                     st.session_state.access_token = res.session.access_token
@@ -961,7 +1143,7 @@ def tela_admin():
         with tab2:
             email = st.text_input("Email", key="cad_email")
             password = st.text_input("Senha", type="password", key="cad_pass")
-            if st.button("Criar conta"):
+            if st.button("Criar conta", type="primary"):
                 try:
                     auth_signup(email, password)
                     st.success("Conta criada! Agora volte na aba Entrar e faça login.")
@@ -980,8 +1162,8 @@ def tela_admin():
 
     tenant = carregar_tenant_admin(access_token)
     if not tenant:
-        st.warning("Você ainda não tem um tenant (loja) criado para esse usuário.")
-        st.info("Tentando criar automaticamente...")
+        st.warning("Você ainda não tem um tenant criado.")
+        st.info("Criando automaticamente...")
         out = criar_tenant_se_nao_existir(access_token)
         if not out or (isinstance(out, dict) and out.get("ok") is False):
             st.error("Falhou ao criar tenant automaticamente.")
@@ -999,7 +1181,7 @@ def tela_admin():
 
     tenant_id = str(tenant.get("id"))
 
-    # MENU no topo
+    # MENU
     menu_topo_comandos(access_token, tenant_id)
 
     # BLOQUEIO SaaS
@@ -1037,8 +1219,12 @@ def tela_admin():
 
     st.success("Acesso liberado ✅")
 
-    if st.button("Sair", key="btn_sair_topo"):
-        auth_logout()
+    ctop1, ctop2 = st.columns([1, 1])
+    with ctop1:
+        st.markdown(f"<div class='muted'>Logado como: <b>{user.email}</b></div>", unsafe_allow_html=True)
+    with ctop2:
+        if st.button("Sair", use_container_width=True):
+            auth_logout()
 
     atualizar_finalizados_admin(access_token, tenant_id)
 
@@ -1070,14 +1256,21 @@ def tela_admin():
     ano_padrao = anos_disponiveis[-1] if anos_disponiveis else date.today().year
 
     with colp2:
-        ano_sel = st.selectbox("Ano", anos_disponiveis if anos_disponiveis else [ano_padrao], index=(len(anos_disponiveis)-1) if anos_disponiveis else 0)
+        ano_sel = st.selectbox(
+            "Ano",
+            anos_disponiveis if anos_disponiveis else [ano_padrao],
+            index=(len(anos_disponiveis) - 1) if anos_disponiveis else 0,
+        )
 
     with colp3:
         mes_sel = st.selectbox("Mês", list(range(1, 13)), index=date.today().month - 1)
 
     df_filtrado = df_admin.copy()
     if periodo == "Mês":
-        df_filtrado = df_filtrado[(df_filtrado["Data_dt"].dt.year == int(ano_sel)) & (df_filtrado["Data_dt"].dt.month == int(mes_sel))]
+        df_filtrado = df_filtrado[
+            (df_filtrado["Data_dt"].dt.year == int(ano_sel))
+            & (df_filtrado["Data_dt"].dt.month == int(mes_sel))
+        ]
     elif periodo == "Ano":
         df_filtrado = df_filtrado[df_filtrado["Data_dt"].dt.year == int(ano_sel)]
 
@@ -1090,10 +1283,10 @@ def tela_admin():
     total_sinais = float(df_filtrado["Sinal"].sum()) if not df_filtrado.empty else 0.0
     qtd = int(len(df_filtrado))
 
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Quantidade", f"{qtd}")
-    c2.metric("Total serviços", fmt_brl(total_servicos))
-    c3.metric("Total sinais", fmt_brl(total_sinais))
+    m1, m2, m3 = st.columns(3)
+    m1.metric("Quantidade", f"{qtd}")
+    m2.metric("Total serviços", fmt_brl(total_servicos))
+    m3.metric("Total sinais", fmt_brl(total_sinais))
 
     df_show = df_filtrado.drop(columns=["Data_dt"]).copy()
     df_show["Preço do serviço"] = df_show["Preço do serviço"].apply(lambda v: fmt_brl(float(v)))
@@ -1102,18 +1295,24 @@ def tela_admin():
 
     st.divider()
     st.subheader("✅ Marcar como PAGO")
-    op_pagar = df_filtrado.apply(lambda r: f'#{r["id"]} | {r["Cliente"]} | {r["Data"]} | {r["Horário"]} | {r["Serviço(s)"]} | {r["Status"]}', axis=1).tolist()
+    op_pagar = df_filtrado.apply(
+        lambda r: f'#{r["id"]} | {r["Cliente"]} | {r["Data"]} | {r["Horário"]} | {r["Serviço(s)"]} | {r["Status"]}',
+        axis=1,
+    ).tolist()
 
     if op_pagar:
         escolha_pagar = st.selectbox("Selecione uma reserva/agendamento", op_pagar, key="sel_pagar")
-        if st.button("Marcar como PAGO ✅"):
+        if st.button("Marcar como PAGO ✅", type="primary"):
             ag_id = int(escolha_pagar.split("|")[0].replace("#", "").strip())
             marcar_como_pago_admin(access_token, tenant_id, ag_id)
             st.success("Marcado como PAGO ✅")
             st.rerun()
 
     st.subheader("🗑️ Excluir")
-    op_excluir = df_filtrado.apply(lambda r: f'#{r["id"]} | {r["Cliente"]} | {r["Data"]} | {r["Horário"]} | {r["Serviço(s)"]} | {r["Status"]}', axis=1).tolist()
+    op_excluir = df_filtrado.apply(
+        lambda r: f'#{r["id"]} | {r["Cliente"]} | {r["Data"]} | {r["Horário"]} | {r["Serviço(s)"]} | {r["Status"]}',
+        axis=1,
+    ).tolist()
 
     if op_excluir:
         escolha_exc = st.selectbox("Selecione", op_excluir, key="sel_exc")
@@ -1122,6 +1321,13 @@ def tela_admin():
             excluir_agendamento_admin(access_token, tenant_id, ag_id)
             st.success("Excluído ✅")
             st.rerun()
+
+    st.markdown(
+        "<div class='muted' style='text-align:center; margin-top:28px;'>"
+        "© Agenda-Pro • Painel do profissional"
+        "</div>",
+        unsafe_allow_html=True,
+    )
 
 # ============================================================
 # ROUTER
