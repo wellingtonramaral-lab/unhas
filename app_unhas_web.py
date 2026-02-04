@@ -243,6 +243,17 @@ def parse_dt(dt_str: str):
     except Exception:
         return None
 
+def dias_restantes(paid_until):
+    if not paid_until:
+        return 0
+    try:
+        hoje = date.today()
+        delta = (paid_until - hoje).days
+        return max(delta, 0)
+    except Exception:
+        return 0
+
+
 def agora_utc():
     return datetime.now(timezone.utc)
 
@@ -1194,6 +1205,18 @@ def tela_admin():
     if not tenant:
         st.error("Não consegui carregar o tenant deste usuário.")
         st.stop()
+
+    paid_until = parse_date_iso(tenant.get("paid_until"))
+    dias = dias_restantes(paid_until)
+
+    if dias > 7:
+        st.success(f"✅ Plano ativo • {dias} dias restantes")
+    elif dias > 0:
+        st.warning(f"⚠️ Atenção: restam apenas {dias} dias de uso")
+    else:
+        st.error("⛔ Seu plano expirou. Renove para continuar usando.")
+        st.stop()
+
 
     tenant_id = str(tenant.get("id"))
 
