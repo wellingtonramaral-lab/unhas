@@ -186,6 +186,7 @@ URL_RESERVAR = st.secrets.get("URL_RESERVAR", "").strip()
 URL_HORARIOS = st.secrets.get("URL_HORARIOS", "").strip()
 URL_TENANT_PUBLIC = st.secrets.get("URL_TENANT_PUBLIC", "").strip()
 URL_CREATE_TENANT = st.secrets.get("URL_CREATE_TENANT", "").strip()
+URL_ASSINAR_PLANO = st.secrets.get("URL_ASSINAR_PLANO", "").strip()
 
 TRIAL_DIAS = int(st.secrets.get("TRIAL_DIAS", 7))
 TEMPO_EXPIRACAO_MIN = int(st.secrets.get("TEMPO_EXPIRACAO_MIN", 60))
@@ -368,7 +369,7 @@ def fn_headers():
         "Authorization": f"Bearer {SUPABASE_ANON_KEY}",
     }
 
-def assert_edge_config(must_have_create: bool = False):
+def assert_edge_config(must_have_create: bool = False, must_have_assinar: bool = False):
     missing = []
     if not URL_TENANT_PUBLIC:
         missing.append("URL_TENANT_PUBLIC")
@@ -378,6 +379,8 @@ def assert_edge_config(must_have_create: bool = False):
         missing.append("URL_HORARIOS")
     if must_have_create and (not URL_CREATE_TENANT):
         missing.append("URL_CREATE_TENANT")
+    if must_have_assinar and (not URL_ASSINAR_PLANO):
+        missing.append("URL_ASSINAR_PLANO")
     if missing:
         st.error("Configuração incompleta no secrets.")
         st.code({"missing": missing})
