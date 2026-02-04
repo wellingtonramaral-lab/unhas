@@ -922,7 +922,7 @@ def tela_publica():
     nome_prof = tenant.get("nome") or "Profissional"
 
     # ✅ CLIENTE: sem slogan/marketing do produto
-    st.markdown(f"## 📅 Agenda de **{nome_prof}**")
+    st.markdown(f"**{nome_prof}**")
     st.caption("Escolha o serviço, o dia e o horário disponível.")
 
     if not tenant.get("pode_operar", False):
