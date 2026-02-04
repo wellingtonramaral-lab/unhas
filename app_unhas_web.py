@@ -243,6 +243,39 @@ def parse_dt(dt_str: str):
     except Exception:
         return None
 
+def renovar_plano_admin(access_token: str, tenant_id: str, dias=30):
+    sb = sb_user(access_token)
+
+    # busca paid_until atual
+    resp = (
+        sb.table("tenants")
+        .select("paid_until")
+        .eq("id", tenant_id)
+        .single()
+        .execute()
+    )
+
+    atual = parse_date_iso(resp.data.get("paid_until"))
+    nova_data = adicionar_dias_plano(atual, dias)
+
+    sb.table("tenants").update({
+        "paid_until": nova_data.isoformat(),
+        "billing_status": "active",
+        "ativo": True,
+    }).eq("id", tenant_id).execute()
+
+    return nova_data
+
+def adicionar_dias_plano(paid_until, dias=30):
+    hoje = date.today()
+
+    if paid_until and paid_until >= hoje:
+        nova_data = paid_until + timedelta(days=dias)
+    else:
+        nova_data = hoje + timedelta(days=dias)
+
+    return nova_data
+
 def dias_restantes(paid_until):
     if not paid_until:
         return 0
@@ -1352,6 +1385,12 @@ def tela_admin():
     if st.button("Excluir agendamento", type="secondary"):
         excluir_agendamento_admin(access_token, tenant_id, int(ag_excluir))
         st.warning("Agendamento excluído.")
+        st.rerun()
+    st.subheader("💳 Renovação de plano")
+
+    if st.button("➕ Adicionar 30 dias"):
+        nova_data = renovar_plano_admin(access_token, tenant_id, dias=30)
+        st.success(f"Plano renovado até **{nova_data.strftime('%d/%m/%Y')}**")
         st.rerun()
 
 
