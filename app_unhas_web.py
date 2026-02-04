@@ -57,25 +57,30 @@ def menu_topo_comandos(access_token: str, tenant_id: str):
     base = PUBLIC_APP_BASE_URL or "https://SEUAPP.streamlit.app"
     link_cliente = f"{base}/?t={tenant_id}"
 
-    # Botão "Menu" e itens dentro
+    # MENU
     with st.expander("☰ Menu", expanded=False):
+        if st.button("👤 Meu perfil", use_container_width=True):
+            st.session_state.show_profile = True
 
-    # Mostra área de copiar (fora do popover, mais estável)
+        if st.button("🔗 Copiar link do cliente", use_container_width=True):
+            st.session_state.show_copy = True
+
+    # ÁREA DE COPIAR LINK (fora do expander)
     if st.session_state.show_copy:
         with st.container(border=True):
             st.markdown("### 🔗 Link do cliente")
-            st.text_input("Copie o link abaixo", value=link_cliente, key="link_cliente_input")
-            st.caption("Dica: clique no campo, depois Ctrl+C (ou no celular: segure e copie).")
+            st.text_input(
+                "Copie o link abaixo",
+                value=link_cliente,
+                key="link_cliente_input"
+            )
+            st.caption("Dica: clique no campo e use Ctrl+C (ou toque e segure no celular).")
 
-            col1, col2 = st.columns([1, 1])
-            with col1:
-                st.code(link_cliente)
-            with col2:
-                if st.button("Fechar", use_container_width=True, key="btn_close_copy"):
-                    st.session_state.show_copy = False
-                    st.rerun()
+            if st.button("Fechar", use_container_width=True):
+                st.session_state.show_copy = False
+                st.rerun()
 
-    # Drawer do perfil
+    # PERFIL
     if st.session_state.show_profile:
         with st.container(border=True):
             st.markdown("### 👤 Meu perfil")
@@ -85,30 +90,48 @@ def menu_topo_comandos(access_token: str, tenant_id: str):
                 st.error("Não foi possível carregar seu perfil.")
                 return
 
-            nome = st.text_input("Nome da profissional", value=profile.get("nome") or "", key="set_nome")
-            whatsapp = st.text_input("WhatsApp (somente números)", value=profile.get("whatsapp") or "", key="set_whats")
-            pix_chave = st.text_input("Chave Pix", value=profile.get("pix_chave") or "", key="set_pix_chave")
-            pix_nome = st.text_input("Nome do Pix", value=profile.get("pix_nome") or "", key="set_pix_nome")
-            pix_cidade = st.text_input("Cidade do Pix", value=profile.get("pix_cidade") or "", key="set_pix_cidade")
+            nome = st.text_input(
+                "Nome da profissional",
+                value=profile.get("nome") or ""
+            )
+            whatsapp = st.text_input(
+                "WhatsApp (somente números)",
+                value=profile.get("whatsapp") or ""
+            )
+            pix_chave = st.text_input(
+                "Chave Pix",
+                value=profile.get("pix_chave") or ""
+            )
+            pix_nome = st.text_input(
+                "Nome do Pix",
+                value=profile.get("pix_nome") or ""
+            )
+            pix_cidade = st.text_input(
+                "Cidade do Pix",
+                value=profile.get("pix_cidade") or ""
+            )
 
-            c1, c2 = st.columns([1, 1])
-            with c1:
-                if st.button("💾 Salvar", use_container_width=True, key="btn_save_profile"):
-                    salvar_profile(access_token, {
-                        "nome": nome.strip(),
-                        "whatsapp": whatsapp.strip(),
-                        "pix_chave": pix_chave.strip(),
-                        "pix_nome": pix_nome.strip(),
-                        "pix_cidade": pix_cidade.strip(),
-                    })
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("💾 Salvar", use_container_width=True):
+                    salvar_profile(
+                        access_token,
+                        {
+                            "nome": nome.strip(),
+                            "whatsapp": whatsapp.strip(),
+                            "pix_chave": pix_chave.strip(),
+                            "pix_nome": pix_nome.strip(),
+                            "pix_cidade": pix_cidade.strip(),
+                        }
+                    )
                     st.success("Perfil atualizado!")
                     st.session_state.show_profile = False
                     st.rerun()
-            with c2:
-                if st.button("Fechar", use_container_width=True, key="btn_close_profile"):
+
+            with col2:
+                if st.button("Fechar", use_container_width=True):
                     st.session_state.show_profile = False
                     st.rerun()
-
 
 
 # ============================================================
