@@ -1225,7 +1225,7 @@ def tela_admin():
     height=360  # <- importante: não deixa a tabela "tomar" o scroll da página
     )
     st.divider()
-
+st.subheader("⚡ Ações rápidas")
 
 # =========================
 # MARCAR COMO PAGO
@@ -1268,6 +1268,7 @@ if st.button("Excluir agendamento", type="secondary"):
     excluir_agendamento_admin(access_token, tenant_id, int(ag_excluir))
     st.warning("Agendamento excluído.")
     st.rerun()
+
 
 
 
