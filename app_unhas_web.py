@@ -838,6 +838,8 @@ def tela_publica():
             for i, img_bytes in enumerate(paginas, start=1):
                 st.markdown(f"**Página {i}**")
                 st.image(img_bytes, use_container_width=True)
+                
+menu_topo_comandos(access_token, tenant_id)
 
 # ============================================================
 # UI: MODO ADMIN (com engrenagem)
@@ -880,8 +882,6 @@ def tela_admin():
         auth_logout()
         st.stop()
 
-    # ✅ Engrenagem no topo
-    drawer_configuracoes_perfil(access_token)
 
     # 3) Tenant
     tenant = carregar_tenant_admin(access_token)
@@ -909,6 +909,8 @@ def tela_admin():
     tenant_id = str(tenant.get("id"))
 
     menu_topo_comandos(access_token, tenant_id)
+
+    drawer_configuracoes_perfil(access_token)
 
     # 4) Bloqueio SaaS no ADMIN
     paid_until = parse_date_iso(tenant.get("paid_until"))
