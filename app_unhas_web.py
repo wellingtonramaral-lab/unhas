@@ -1402,35 +1402,38 @@ def tela_admin():
 
     if st.button("🚀 Assinar plano", type="primary", use_container_width=True):
         try:
+            if not URL_ASSINAR_PLANO:
+                st.error("Falta configurar URL_ASSINAR_PLANO no secrets.")
+                st.stop()
+
             resp = requests.post(
-                st.secrets["URL_ASSINAR_PLANO"],
-                headers={
-                    "Content-Type": "application/json",
-                    "Authorization": f"Bearer {SUPABASE_ANON_KEY}",
-                },
+                URL_ASSINAR_PLANO,
+                headers=fn_headers(),
                 json={
-                    "tenant_id": tenant_id,
-                    "email": user.email,
+                    "tenant_id": str(tenant_id),
+                    "customer_email": str(user.email or ""),
+                    "customer_name": str((tenant.get("nome") or "Profissional")),
                 },
-                timeout=15,
+                timeout=20,
             )
 
-            data = resp.json()
+        # DEBUG
+            st.caption(f"HTTP {resp.status_code}")
+            st.code(resp.text)
 
-            if resp.status_code != 200 or not data.get("payment_url"):
+            data = resp.json() if resp.text else {}
+
+            if resp.status_code != 200 or not data.get("ok") or not data.get("payment_url"):
                 st.error("Erro ao gerar pagamento.")
                 st.code(data)
             else:
-                st.success("Redirecionando para pagamento…")
-                st.link_button(
-                    "👉 Ir para pagamento",
-                    data["payment_url"],
-                    use_container_width=True,
-                )
+                st.success("Pagamento gerado ✅")
+                st.link_button("👉 Ir para pagamento", data["payment_url"], use_container_width=True)
 
         except Exception as e:
             st.error("Falha ao iniciar assinatura.")
             st.code(str(e))
+
 
 
 # ============================================================
