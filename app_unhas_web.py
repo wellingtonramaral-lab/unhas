@@ -961,10 +961,6 @@ def tela_publica():
         st.error("Este link não é válido, não existe ou não está público ainda.")
         st.stop()
 
-    if not whatsapp_num or len("".join([c for c in whatsapp_num if c.isdigit()])) < 10:
-      st.error("WhatsApp do profissional inválido. Peça para ele configurar no painel.")
-      st.stop()
-
     nome_raw = (tenant.get("nome") or "").strip()
     if not nome_raw or nome_raw.lower() in ("minha loja", "minha agenda"):
       nome_prof = "Profissional"
@@ -984,6 +980,10 @@ def tela_publica():
     pix_chave = (tenant.get("pix_chave") or "").strip()
     pix_nome = (tenant.get("pix_nome") or "Profissional").strip()
     pix_cidade = (tenant.get("pix_cidade") or "BRASIL").strip()
+
+    if not whatsapp_num or len("".join([c for c in whatsapp_num if c.isdigit()])) < 10:
+      st.error("WhatsApp do profissional inválido. Peça para ele configurar no painel.")
+      st.stop()
 
     if not whatsapp_num:
         st.warning("WhatsApp deste profissional não configurado.")
