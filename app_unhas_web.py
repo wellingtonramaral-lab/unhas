@@ -1224,63 +1224,50 @@ def tela_admin():
     use_container_width=True,
     height=360  # <- importante: não deixa a tabela "tomar" o scroll da página
     )
-    st.subheader("✅ Marcar como PAGO")
+    st.divider()
+st.subheader("⚡ Ações rápidas")
 
-    ag_pagar = st.selectbox(
+# =========================
+# MARCAR COMO PAGO
+# =========================
+st.subheader("✅ Marcar como PAGO")
+
+ag_pagar = st.selectbox(
     "Selecione o agendamento",
     df_admin["id"],
-    format_func=lambda x: f"{df_admin[df_admin.id == x]['Cliente'].values[0]} • {df_admin[df_admin.id == x]['Data'].values[0]} {df_admin[df_admin.id == x]['Horário'].values[0]}"
-    )
+    format_func=lambda x: (
+        f"{df_admin[df_admin.id == x]['Cliente'].values[0]} • "
+        f"{df_admin[df_admin.id == x]['Data'].values[0]} "
+        f"{df_admin[df_admin.id == x]['Horário'].values[0]}"
+    ),
+    key="pagar_select",
+)
 
-    if st.button("Marcar como PAGO", type="primary"):
-        marcar_como_pago_admin(access_token, tenant_id, int(ag_pagar))
+if st.button("Marcar como PAGO", type="primary"):
+    marcar_como_pago_admin(access_token, tenant_id, int(ag_pagar))
     st.success("Agendamento marcado como PAGO.")
     st.rerun()
 
+# =========================
+# EXCLUIR AGENDAMENTO
+# =========================
+st.subheader("🗑️ Excluir agendamento")
 
-    st.subheader("🗑️ Excluir agendamento")
-
-    ag_excluir = st.selectbox(
+ag_excluir = st.selectbox(
     "Selecione para excluir",
     df_admin["id"],
-    format_func=lambda x: f"{df_admin[df_admin.id == x]['Cliente'].values[0]} • {df_admin[df_admin.id == x]['Data'].values[0]} {df_admin[df_admin.id == x]['Horário'].values[0]}",
-    key="excluir_select"
-    )
+    format_func=lambda x: (
+        f"{df_admin[df_admin.id == x]['Cliente'].values[0]} • "
+        f"{df_admin[df_admin.id == x]['Data'].values[0]} "
+        f"{df_admin[df_admin.id == x]['Horário'].values[0]}"
+    ),
+    key="excluir_select_unique",
+)
 
-    if st.button("Excluir agendamento", type="secondary"):
-        excluir_agendamento_admin(access_token, tenant_id, int(ag_excluir))
-        st.warning("Agendamento excluído.")
+if st.button("Excluir agendamento", type="secondary"):
+    excluir_agendamento_admin(access_token, tenant_id, int(ag_excluir))
+    st.warning("Agendamento excluído.")
     st.rerun()
-    st.divider()
-    st.subheader("Ações rápidas")
-
-    st.subheader("✅ Marcar como PAGO")
-
-    ag_pagar = st.selectbox(
-    "Selecione o agendamento",
-    df_admin["id"],
-    format_func=lambda x: f"{df_admin[df_admin.id == x]['Cliente'].values[0]} • {df_admin[df_admin.id == x]['Data'].values[0]} {df_admin[df_admin.id == x]['Horário'].values[0]}"
-    )
-
-    if st.button("Marcar como PAGO", type="primary"):
-        marcar_como_pago_admin(access_token, tenant_id, int(ag_pagar))
-    st.success("Agendamento marcado como PAGO.")
-    st.rerun()
-
-
-    st.subheader("🗑️ Excluir agendamento")
-
-    ag_excluir = st.selectbox(
-        "Selecione para excluir",
-        df_admin["id"],
-        format_func=lambda x: f"{df_admin[df_admin.id == x]['Cliente'].values[0]} • {df_admin[df_admin.id == x]['Data'].values[0]} {df_admin[df_admin.id == x]['Horário'].values[0]}",
-        key="excluir_select"
-    )
-
-    if st.button("Excluir agendamento", type="secondary"):
-        excluir_agendamento_admin(access_token, tenant_id, int(ag_excluir))
-        st.warning("Agendamento excluído.")
-        st.rerun()
 
 
 
