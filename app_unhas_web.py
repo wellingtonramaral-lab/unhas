@@ -416,6 +416,14 @@ def salvar_profile(access_token: str, dados: dict):
     uid = sb.auth.get_user(access_token).user.id
     return sb.table("profiles").update(dados).eq("id", uid).execute()
 
+def atualizar_tenant_whatsapp(access_token: str, tenant_id: str, whatsapp: str):
+    sb = sb_user(access_token)
+    w = (whatsapp or "").strip()
+    return sb.table("tenants").update({
+        "whatsapp_numero": w,
+        "whatsapp": w,
+    }).eq("id", str(tenant_id)).execute()
+
 # ============================================================
 # TENANT SETTINGS (JSON em tenants.settings)
 # ============================================================
@@ -838,6 +846,14 @@ def menu_topo_comandos(access_token: str, tenant_id: str):
                             "pix_cidade": pix_cidade.strip(),
                         },
                     )
+
+                    # ✅ mantém o número do tenant atualizado (isso corrige o WhatsApp público)
+                    atualizar_tenant_whatsapp(access_token, tenant_id, whatsapp.strip())
+
+                    st.success("Perfil atualizado!")
+                    st.session_state.show_profile = False
+                    st.rerun()
+
                     st.success("Perfil atualizado!")
                     st.session_state.show_profile = False
                     st.rerun()
