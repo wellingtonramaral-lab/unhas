@@ -1070,7 +1070,7 @@ def tela_admin():
     st.markdown(
         """
         <div style="padding:14px 6px 10px 6px;">
-          <div class="chip">📌 <span>Agendamentos online para <b>qualquer profissional</b></span></div>
+          <div class="chip">📌 <span>Agendamentos online </span></div>
           <h1 style="margin-top:10px;">📅 Agenda-Pro</h1>
           <div class="muted" style="font-size:1.05rem; margin-top:4px;">
             Organize seus atendimentos, compartilhe seu link e confirme reservas com facilidade.
