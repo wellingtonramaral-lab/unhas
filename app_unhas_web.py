@@ -919,7 +919,12 @@ def tela_publica():
         st.error("Este link não é válido, não existe ou não está público ainda.")
         st.stop()
 
-    nome_prof = tenant.get("nome") or "Profissional"
+    nome_raw = (tenant.get("nome") or "").strip()
+    if not nome_raw or nome_raw.lower() in ("minha loja", "minha agenda"):
+      nome_prof = "Profissional"
+    else:
+      nome_prof = nome_raw
+
 
     # ✅ CLIENTE: sem slogan/marketing do produto
     st.markdown(f"##            **{nome_prof}**")
@@ -1224,10 +1229,33 @@ st.divider()
 st.subheader("Ações rápidas")
 
 st.subheader("✅ Marcar como PAGO")
-# ... seu código de pagar
 
-st.subheader("🗑️ Excluir")
-# ... seu código de excluir
+ag_pagar = st.selectbox(
+    "Selecione o agendamento",
+    df_admin["id"],
+    format_func=lambda x: f"{df_admin[df_admin.id == x]['Cliente'].values[0]} • {df_admin[df_admin.id == x]['Data'].values[0]} {df_admin[df_admin.id == x]['Horário'].values[0]}"
+)
+
+if st.button("Marcar como PAGO", type="primary"):
+    marcar_como_pago_admin(access_token, tenant_id, int(ag_pagar))
+    st.success("Agendamento marcado como PAGO.")
+    st.rerun()
+
+
+st.subheader("🗑️ Excluir agendamento")
+
+ag_excluir = st.selectbox(
+    "Selecione para excluir",
+    df_admin["id"],
+    format_func=lambda x: f"{df_admin[df_admin.id == x]['Cliente'].values[0]} • {df_admin[df_admin.id == x]['Data'].values[0]} {df_admin[df_admin.id == x]['Horário'].values[0]}",
+    key="excluir_select"
+)
+
+if st.button("Excluir agendamento", type="secondary"):
+    excluir_agendamento_admin(access_token, tenant_id, int(ag_excluir))
+    st.warning("Agendamento excluído.")
+    st.rerun()
+
 
 
 # ============================================================
