@@ -1225,7 +1225,7 @@ def tela_admin():
     height=360  # <- importante: não deixa a tabela "tomar" o scroll da página
     )
     st.divider()
-st.subheader("⚡ Ações rápidas")
+
 
 # =========================
 # MARCAR COMO PAGO
