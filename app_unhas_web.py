@@ -1233,7 +1233,7 @@ def tela_admin():
     )
 
     if st.button("Marcar como PAGO", type="primary"):
-    marcar_como_pago_admin(access_token, tenant_id, int(ag_pagar))
+        marcar_como_pago_admin(access_token, tenant_id, int(ag_pagar))
     st.success("Agendamento marcado como PAGO.")
     st.rerun()
 
@@ -1248,8 +1248,8 @@ def tela_admin():
     )
 
     if st.button("Excluir agendamento", type="secondary"):
-    excluir_agendamento_admin(access_token, tenant_id, int(ag_excluir))
-    st.warning("Agendamento excluído.")
+        excluir_agendamento_admin(access_token, tenant_id, int(ag_excluir))
+        st.warning("Agendamento excluído.")
     st.rerun()
     st.divider()
     st.subheader("Ações rápidas")
@@ -1263,7 +1263,7 @@ def tela_admin():
     )
 
     if st.button("Marcar como PAGO", type="primary"):
-    marcar_como_pago_admin(access_token, tenant_id, int(ag_pagar))
+        marcar_como_pago_admin(access_token, tenant_id, int(ag_pagar))
     st.success("Agendamento marcado como PAGO.")
     st.rerun()
 
