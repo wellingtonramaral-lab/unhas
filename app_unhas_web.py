@@ -838,8 +838,6 @@ def tela_publica():
             for i, img_bytes in enumerate(paginas, start=1):
                 st.markdown(f"**Página {i}**")
                 st.image(img_bytes, use_container_width=True)
-                
-menu_topo_comandos(access_token, tenant_id)
 
 # ============================================================
 # UI: MODO ADMIN (com engrenagem)
