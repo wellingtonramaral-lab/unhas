@@ -277,15 +277,25 @@ def adicionar_dias_plano(paid_until, dias=30):
 
     return nova_data
 
-def dias_restantes(paid_until):
-    if not paid_until:
+def get_my_tenant(sb, uid: str):
+    resp = (
+        sb.table("tenants")
+        .select("id,nome,paid_until,billing_status,ativo,merged_into,created_at")
+        .eq("owner_user_id", uid)
+        .is_("merged_into", "null")
+        .order("created_at", desc=True)
+        .limit(1)
+        .execute()
+    )
+    return (resp.data or [None])[0]
+
+from datetime import date
+
+def dias_restantes(paid_until_str: str) -> int:
+    if not paid_until_str:
         return 0
-    try:
-        hoje = date.today()
-        delta = (paid_until - hoje).days
-        return max(delta, 0)
-    except Exception:
-        return 0
+    paid = date.fromisoformat(paid_until_str)   # "YYYY-MM-DD"
+    return (paid - date.today()).days
 
 
 def agora_utc():
@@ -446,7 +456,7 @@ def get_auth_user(access_token: str):
 def carregar_profile(access_token: str):
     sb = sb_user(access_token)
     try:
-        uid = sb.auth.get_user(access_token).user.id
+        uid = st.session_state["user"]["id"]
         resp = (
             sb.table("profiles")
             .select("id,email,nome,whatsapp,pix_chave,pix_nome,pix_cidade")
@@ -463,13 +473,15 @@ def salvar_profile(access_token: str, dados: dict):
     uid = sb.auth.get_user(access_token).user.id
     return sb.table("profiles").update(dados).eq("id", uid).execute()
 
-def atualizar_tenant_whatsapp(access_token: str, tenant_id: str, whatsapp: str):
-    sb = sb_user(access_token)
+def atualizar_tenant_whatsapp(sb, uid: str, tenant_id: str, whatsapp: str):
     w = (whatsapp or "").strip()
-    return sb.table("tenants").update({
-        "whatsapp_numero": w,
-        "whatsapp": w,
-    }).eq("id", str(tenant_id)).execute()
+    return (
+        sb.table("tenants")
+        .update({"whatsapp_numero": w, "whatsapp": w})
+        .eq("id", str(tenant_id))
+        .eq("owner_user_id", uid)   # <- trava aqui
+        .execute()
+    )
 
 # ============================================================
 # TENANT SETTINGS (JSON em tenants.settings)
