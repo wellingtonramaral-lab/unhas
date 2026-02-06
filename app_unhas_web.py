@@ -291,10 +291,20 @@ def get_my_tenant(sb, uid: str):
 
 from datetime import date
 
-def dias_restantes(paid_until_str: str) -> int:
-    if not paid_until_str:
+def dias_restantes(paid_until) -> int:
+    if not paid_until:
         return 0
-    paid = date.fromisoformat(paid_until_str)   # "YYYY-MM-DD"
+
+    if isinstance(paid_until, str):
+        try:
+            paid = date.fromisoformat(paid_until)
+        except Exception:
+            return 0
+    elif isinstance(paid_until, date):
+        paid = paid_until
+    else:
+        return 0
+
     return (paid - date.today()).days
 
 
