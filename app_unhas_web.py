@@ -1425,8 +1425,6 @@ def tela_admin():
             )
 
         # DEBUG
-            st.caption(f"HTTP {resp.status_code}")
-            st.code(resp.text)
 
             data = resp.json() if resp.text else {}
 
@@ -1435,6 +1433,7 @@ def tela_admin():
                 st.code(data)
             else:
                 st.success("Pagamento gerado ✅")
+                st.link_button("👉 Ir para pagamento", data["payment_url"], use_container_width=True)
 
         except Exception as e:
             st.error("Falha ao iniciar assinatura.")
