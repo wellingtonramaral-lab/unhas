@@ -564,34 +564,40 @@ def guess_content_type(filename: str) -> str:
 
 def upload_catalog_image(access_token: str, tenant_id: str, uploaded_file) -> tuple[bool, str, dict]:
     """
-    Faz upload para Supabase Storage (bucket público) em: {tenant_id}/{timestamp}_{filename}
-    Retorna (ok, msg, item={path,url,caption})
+    Upload direto no Supabase Storage via HTTP (respeita RLS com auth.uid()).
+    Salva em: {tenant_id}/{timestamp}_{filename}
     """
     try:
-        sb = sb_user(access_token)
-
         ts = datetime.now().strftime("%Y%m%d%H%M%S")
         safe_name = "".join([c for c in (uploaded_file.name or "foto.jpg") if c.isalnum() or c in ("-", "_", ".", " ")])
-        safe_name = safe_name.strip().replace(" ", "_")
-        if not safe_name:
-            safe_name = "foto.jpg"
+        safe_name = safe_name.strip().replace(" ", "_") or "foto.jpg"
 
         path = f"{tenant_id}/{ts}_{safe_name}"
         content_type = guess_content_type(safe_name)
         file_bytes = uploaded_file.getvalue()
 
-        # ✅ IMPORTANTE: headers precisam ser string/bytes (NUNCA bool)
-        # Supabase Storage usa o header x-upsert: "true"
-        sb.storage.from_(CATALOGO_BUCKET).upload(
-            path=path,
-            file=file_bytes,
-            file_options={
-                "content-type": str(content_type),
-                "x-upsert": "true",
-            },
-        )
+        # Endpoint do Storage
+        # PUT é o método padrão para upload de objeto
+        url = f"{SUPABASE_URL}/storage/v1/object/{CATALOGO_BUCKET}/{path}"
 
-        public_url = sb.storage.from_(CATALOGO_BUCKET).get_public_url(path)
+        headers = {
+            "Authorization": f"Bearer {access_token}",
+            "apikey": SUPABASE_ANON_KEY,
+            "Content-Type": str(content_type),
+            "x-upsert": "true",
+        }
+
+        resp = requests.put(url, headers=headers, data=file_bytes, timeout=30)
+
+        if resp.status_code not in (200, 201):
+            # Storage geralmente devolve JSON com error/message
+            try:
+                return False, str(resp.json()), {}
+            except Exception:
+                return False, f"HTTP {resp.status_code}: {resp.text}", {}
+
+        # Bucket público => URL pública direta
+        public_url = f"{SUPABASE_URL}/storage/v1/object/public/{CATALOGO_BUCKET}/{path}"
         item = {"path": path, "url": public_url, "caption": ""}
         return True, "", item
 
@@ -599,13 +605,27 @@ def upload_catalog_image(access_token: str, tenant_id: str, uploaded_file) -> tu
         return False, str(e), {}
 
 
+
 def delete_catalog_image(access_token: str, path: str) -> tuple[bool, str]:
     try:
         if not path:
             return False, "path vazio"
-        sb = sb_user(access_token)
-        sb.storage.from_(CATALOGO_BUCKET).remove([path])
+
+        url = f"{SUPABASE_URL}/storage/v1/object/{CATALOGO_BUCKET}/{path}"
+        headers = {
+            "Authorization": f"Bearer {access_token}",
+            "apikey": SUPABASE_ANON_KEY,
+        }
+
+        resp = requests.delete(url, headers=headers, timeout=20)
+        if resp.status_code not in (200, 204):
+            try:
+                return False, str(resp.json())
+            except Exception:
+                return False, f"HTTP {resp.status_code}: {resp.text}"
+
         return True, ""
+
     except Exception as e:
         return False, str(e)
 
