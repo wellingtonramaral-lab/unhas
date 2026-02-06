@@ -230,10 +230,24 @@ VALOR_SINAL_FIXO = 20.0
 def sb_anon():
     return create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
 
+from supabase import create_client, ClientOptions
+
 def sb_user(access_token: str):
-    sb = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
-    sb.postgrest.auth(access_token)
+    opts = ClientOptions(
+        headers={
+            "Authorization": f"Bearer {access_token}"
+        }
+    )
+    sb = create_client(SUPABASE_URL, SUPABASE_ANON_KEY, options=opts)
+
+    # (Opcional) manter também no PostgREST, não atrapalha:
+    try:
+        sb.postgrest.auth(access_token)
+    except Exception:
+        pass
+
     return sb
+
 
 # ============================================================
 # HELPERS
