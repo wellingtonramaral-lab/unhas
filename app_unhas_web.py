@@ -555,6 +555,7 @@ def upload_catalog_image(access_token: str, tenant_id: str, uploaded_file) -> tu
     """
     try:
         sb = sb_user(access_token)
+
         ts = datetime.now().strftime("%Y%m%d%H%M%S")
         safe_name = "".join([c for c in (uploaded_file.name or "foto.jpg") if c.isalnum() or c in ("-", "_", ".", " ")])
         safe_name = safe_name.strip().replace(" ", "_")
@@ -565,18 +566,24 @@ def upload_catalog_image(access_token: str, tenant_id: str, uploaded_file) -> tu
         content_type = guess_content_type(safe_name)
         file_bytes = uploaded_file.getvalue()
 
+        # ✅ IMPORTANTE: headers precisam ser string/bytes (NUNCA bool)
+        # Supabase Storage usa o header x-upsert: "true"
         sb.storage.from_(CATALOGO_BUCKET).upload(
             path=path,
             file=file_bytes,
-            file_options={"content-type": content_type, "upsert": True},
+            file_options={
+                "content-type": str(content_type),
+                "x-upsert": "true",
+            },
         )
 
         public_url = sb.storage.from_(CATALOGO_BUCKET).get_public_url(path)
-
         item = {"path": path, "url": public_url, "caption": ""}
         return True, "", item
+
     except Exception as e:
         return False, str(e), {}
+
 
 def delete_catalog_image(access_token: str, path: str) -> tuple[bool, str]:
     try:
