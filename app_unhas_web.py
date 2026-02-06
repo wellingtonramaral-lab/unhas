@@ -198,6 +198,9 @@ SAAS_PIX_CIDADE = st.secrets.get("SAAS_PIX_CIDADE", "BRASIL").strip()
 SAAS_MENSAL_VALOR = st.secrets.get("SAAS_MENSAL_VALOR", "R$ 39,90").strip()
 SAAS_SUPORTE_WHATSAPP = st.secrets.get("SAAS_SUPORTE_WHATSAPP", "").strip()
 
+# Bucket do catálogo (Supabase Storage)
+CATALOGO_BUCKET = st.secrets.get("CATALOGO_BUCKET", "catalogos").strip() or "catalogos"
+
 # ============================================================
 # DEFAULTS (serviços + horários)
 # ============================================================
@@ -244,57 +247,25 @@ def parse_dt(dt_str: str):
     except Exception:
         return None
 
-def renovar_plano_admin(access_token: str, tenant_id: str, dias=30):
-    sb = sb_user(access_token)
-
-    # busca paid_until atual
-    resp = (
-        sb.table("tenants")
-        .select("paid_until")
-        .eq("id", tenant_id)
-        .single()
-        .execute()
-    )
-
-    atual = parse_date_iso(resp.data.get("paid_until"))
-    nova_data = adicionar_dias_plano(atual, dias)
-
-    sb.table("tenants").update({
-        "paid_until": nova_data.isoformat(),
-        "billing_status": "active",
-        "ativo": True,
-    }).eq("id", tenant_id).execute()
-
-    return nova_data
-
 def adicionar_dias_plano(paid_until, dias=30):
     hoje = date.today()
-
     if paid_until and paid_until >= hoje:
         nova_data = paid_until + timedelta(days=dias)
     else:
         nova_data = hoje + timedelta(days=dias)
-
     return nova_data
 
-def get_my_tenant(sb, uid: str):
-    resp = (
-        sb.table("tenants")
-        .select("id,nome,paid_until,billing_status,ativo,merged_into,created_at")
-        .eq("owner_user_id", uid)
-        .is_("merged_into", "null")
-        .order("created_at", desc=True)
-        .limit(1)
-        .execute()
-    )
-    return (resp.data or [None])[0]
-
-from datetime import date
+def parse_date_iso(d):
+    if not d:
+        return None
+    try:
+        return date.fromisoformat(str(d))
+    except Exception:
+        return None
 
 def dias_restantes(paid_until) -> int:
     if not paid_until:
         return 0
-
     if isinstance(paid_until, str):
         try:
             paid = date.fromisoformat(paid_until)
@@ -304,9 +275,7 @@ def dias_restantes(paid_until) -> int:
         paid = paid_until
     else:
         return 0
-
     return (paid - date.today()).days
-
 
 def agora_utc():
     return datetime.now(timezone.utc)
@@ -319,14 +288,6 @@ def agendamento_dt_local(data_str: str, horario_str: str):
         d = datetime.strptime(str(data_str), "%Y-%m-%d").date()
         hh, mm = str(horario_str).split(":")
         return datetime(d.year, d.month, d.day, int(hh), int(mm), 0, tzinfo=LOCAL_TZ)
-    except Exception:
-        return None
-
-def parse_date_iso(d):
-    if not d:
-        return None
-    try:
-        return date.fromisoformat(str(d))
     except Exception:
         return None
 
@@ -436,6 +397,8 @@ if "show_hours" not in st.session_state:
     st.session_state.show_hours = False
 if "show_services" not in st.session_state:
     st.session_state.show_services = False
+if "show_catalog" not in st.session_state:
+    st.session_state.show_catalog = False
 
 # ============================================================
 # AUTH (ADMIN)
@@ -483,13 +446,15 @@ def salvar_profile(access_token: str, dados: dict):
     uid = sb.auth.get_user(access_token).user.id
     return sb.table("profiles").update(dados).eq("id", uid).execute()
 
-def atualizar_tenant_whatsapp(sb, uid: str, tenant_id: str, whatsapp: str):
+def atualizar_tenant_whatsapp(sb_or_token, uid: str, tenant_id: str, whatsapp: str):
+    # compat: no arquivo original isso recebia sb; aqui aceito token ou sb
+    sb = sb_or_token if hasattr(sb_or_token, "table") else sb_user(sb_or_token)
     w = (whatsapp or "").strip()
     return (
         sb.table("tenants")
         .update({"whatsapp_numero": w, "whatsapp": w})
         .eq("id", str(tenant_id))
-        .eq("owner_user_id", uid)   # <- trava aqui
+        .eq("owner_user_id", uid)
         .execute()
     )
 
@@ -541,6 +506,87 @@ def settings_get_working_hours(settings: dict):
             out.setdefault(str(i), DEFAULT_WORKING_HOURS.get(str(i), []))
         return out
     return DEFAULT_WORKING_HOURS.copy()
+
+# ----------------------------
+# CATÁLOGO por tenant (settings)
+# settings["catalog"] = {
+#   "enabled": true,
+#   "images": [{"path": "...", "url": "...", "caption": "..."}, ...]
+# }
+# ----------------------------
+def settings_get_catalog(settings: dict):
+    c = settings.get("catalog")
+    if isinstance(c, dict):
+        enabled = bool(c.get("enabled", True))
+        images = c.get("images")
+        if isinstance(images, list):
+            clean = []
+            for it in images:
+                if not isinstance(it, dict):
+                    continue
+                url = str(it.get("url") or "").strip()
+                path = str(it.get("path") or "").strip()
+                caption = str(it.get("caption") or "").strip()
+                if url and path:
+                    clean.append({"url": url, "path": path, "caption": caption})
+            return {"enabled": enabled, "images": clean}
+        return {"enabled": enabled, "images": []}
+    return {"enabled": True, "images": []}
+
+def settings_set_catalog(settings: dict, enabled: bool, images: list):
+    settings["catalog"] = {"enabled": bool(enabled), "images": images}
+    return settings
+
+# ============================================================
+# STORAGE (upload / delete) para catálogo
+# ============================================================
+def guess_content_type(filename: str) -> str:
+    fn = (filename or "").lower()
+    if fn.endswith(".png"):
+        return "image/png"
+    if fn.endswith(".webp"):
+        return "image/webp"
+    return "image/jpeg"
+
+def upload_catalog_image(access_token: str, tenant_id: str, uploaded_file) -> tuple[bool, str, dict]:
+    """
+    Faz upload para Supabase Storage (bucket público) em: {tenant_id}/{timestamp}_{filename}
+    Retorna (ok, msg, item={path,url,caption})
+    """
+    try:
+        sb = sb_user(access_token)
+        ts = datetime.now().strftime("%Y%m%d%H%M%S")
+        safe_name = "".join([c for c in (uploaded_file.name or "foto.jpg") if c.isalnum() or c in ("-", "_", ".", " ")])
+        safe_name = safe_name.strip().replace(" ", "_")
+        if not safe_name:
+            safe_name = "foto.jpg"
+
+        path = f"{tenant_id}/{ts}_{safe_name}"
+        content_type = guess_content_type(safe_name)
+        file_bytes = uploaded_file.getvalue()
+
+        sb.storage.from_(CATALOGO_BUCKET).upload(
+            path=path,
+            file=file_bytes,
+            file_options={"content-type": content_type, "upsert": True},
+        )
+
+        public_url = sb.storage.from_(CATALOGO_BUCKET).get_public_url(path)
+
+        item = {"path": path, "url": public_url, "caption": ""}
+        return True, "", item
+    except Exception as e:
+        return False, str(e), {}
+
+def delete_catalog_image(access_token: str, path: str) -> tuple[bool, str]:
+    try:
+        if not path:
+            return False, "path vazio"
+        sb = sb_user(access_token)
+        sb.storage.from_(CATALOGO_BUCKET).remove([path])
+        return True, ""
+    except Exception as e:
+        return False, str(e)
 
 # ============================================================
 # TENANT LOAD (público / admin)
@@ -758,12 +804,9 @@ def atualizar_finalizados_admin(access_token: str, tenant_id: str):
 # ============================================================
 def montar_link_whatsapp(whatsapp_numero: str, texto: str):
     num = "".join([c for c in str(whatsapp_numero or "") if c.isdigit()])
-
-    # se não tiver DDI, assume Brasil 55
     if num and not num.startswith("55"):
-        if len(num) in (10, 11):  # celular BR
+        if len(num) in (10, 11):
             num = "55" + num
-
     text_encoded = urllib.parse.quote(texto, safe="")
     return f"https://wa.me/{num}?text={text_encoded}"
 
@@ -799,32 +842,6 @@ def montar_mensagem_pagamento_cliente(
     return msg
 
 # ============================================================
-# CATÁLOGO PDF → IMAGENS
-# ============================================================
-CATALOGO_PDF = "catalogo.pdf"
-
-@st.cache_data(show_spinner=False)
-def pdf_para_imagens_com_fundo_branco(caminho_pdf: str, zoom: float = 2.0):
-    doc = fitz.open(caminho_pdf)
-    imagens = []
-    mat = fitz.Matrix(zoom, zoom)
-
-    for page in doc:
-        pix = page.get_pixmap(matrix=mat, alpha=True)
-        png_bytes = pix.tobytes("png")
-
-        img = Image.open(io.BytesIO(png_bytes)).convert("RGBA")
-        bg = Image.new("RGBA", img.size, (255, 255, 255, 255))
-        out = Image.alpha_composite(bg, img).convert("RGB")
-
-        buf = io.BytesIO()
-        out.save(buf, format="PNG", optimize=True)
-        imagens.append(buf.getvalue())
-
-    doc.close()
-    return imagens
-
-# ============================================================
 # HORÁRIOS (usando settings)
 # ============================================================
 WEEKDAY_LABELS = {
@@ -842,7 +859,7 @@ def horarios_do_dia_com_settings(d: date, working_hours: dict):
     return working_hours.get(wd, [])
 
 # ============================================================
-# MENU (expander) com 4 itens
+# MENU (expander) com itens
 # ============================================================
 def menu_topo_comandos(access_token: str, tenant_id: str):
     settings = get_tenant_settings_admin(access_token, tenant_id)
@@ -853,31 +870,42 @@ def menu_topo_comandos(access_token: str, tenant_id: str):
     link_cliente = f"{base}/?t={tenant_id}"
 
     with st.expander("☰ Menu rápido", expanded=False):
-        st.caption("Ações do seu painel (perfil, link, horários e serviços).")
+        st.caption("Ações do seu painel (perfil, link, horários, serviços e catálogo).")
 
         if st.button("👤 Meu perfil", use_container_width=True):
             st.session_state.show_profile = True
             st.session_state.show_copy = False
             st.session_state.show_hours = False
             st.session_state.show_services = False
+            st.session_state.show_catalog = False
 
         if st.button("🔗 Copiar link do cliente", use_container_width=True):
             st.session_state.show_copy = True
             st.session_state.show_profile = False
             st.session_state.show_hours = False
             st.session_state.show_services = False
+            st.session_state.show_catalog = False
 
         if st.button("⏰ Horário de trabalho", use_container_width=True):
             st.session_state.show_hours = True
             st.session_state.show_profile = False
             st.session_state.show_copy = False
             st.session_state.show_services = False
+            st.session_state.show_catalog = False
 
         if st.button("🧾 Serviços e valores", use_container_width=True):
             st.session_state.show_services = True
             st.session_state.show_profile = False
             st.session_state.show_copy = False
             st.session_state.show_hours = False
+            st.session_state.show_catalog = False
+
+        if st.button("📒 Catálogo (fotos)", use_container_width=True):
+            st.session_state.show_catalog = True
+            st.session_state.show_profile = False
+            st.session_state.show_copy = False
+            st.session_state.show_hours = False
+            st.session_state.show_services = False
 
     if st.session_state.show_copy:
         with st.container(border=True):
@@ -905,6 +933,8 @@ def menu_topo_comandos(access_token: str, tenant_id: str):
             c1, c2 = st.columns(2)
             with c1:
                 if st.button("💾 Salvar", use_container_width=True, type="primary"):
+                    sb = sb_user(access_token)
+                    uid = sb.auth.get_user(access_token).user.id
                     salvar_profile(
                         access_token,
                         {
@@ -915,14 +945,7 @@ def menu_topo_comandos(access_token: str, tenant_id: str):
                             "pix_cidade": pix_cidade.strip(),
                         },
                     )
-
-                    # ✅ mantém o número do tenant atualizado (isso corrige o WhatsApp público)
-                    atualizar_tenant_whatsapp(access_token, tenant_id, whatsapp.strip())
-
-                    st.success("Perfil atualizado!")
-                    st.session_state.show_profile = False
-                    st.rerun()
-
+                    atualizar_tenant_whatsapp(access_token, uid, tenant_id, whatsapp.strip())
                     st.success("Perfil atualizado!")
                     st.session_state.show_profile = False
                     st.rerun()
@@ -1037,6 +1060,103 @@ def menu_topo_comandos(access_token: str, tenant_id: str):
                     st.session_state.show_services = False
                     st.rerun()
 
+    # ==========================
+    # CATÁLOGO (fotos) - ADMIN
+    # ==========================
+    if st.session_state.show_catalog:
+        with st.container(border=True):
+            st.markdown("### 📒 Catálogo (fotos)")
+            st.caption("Envie fotos do seu trabalho. Elas aparecem automaticamente no seu link público.")
+
+            catalog = settings_get_catalog(settings)
+            enabled = st.checkbox("Mostrar catálogo no link público", value=catalog["enabled"])
+            images = catalog["images"]
+
+            st.divider()
+            st.markdown("**Adicionar fotos**")
+            up = st.file_uploader(
+                "Selecione 1 ou mais imagens (JPG/PNG/WEBP)",
+                type=["jpg", "jpeg", "png", "webp"],
+                accept_multiple_files=True,
+                label_visibility="collapsed",
+            )
+
+            if st.button("⬆️ Enviar fotos", type="primary", use_container_width=True, disabled=not up):
+                added = 0
+                errs = []
+                for f in (up or []):
+                    ok, msg, item = upload_catalog_image(access_token, tenant_id, f)
+                    if ok and item:
+                        images.append(item)
+                        added += 1
+                    else:
+                        errs.append(f"{f.name}: {msg}")
+
+                settings_set_catalog(settings, enabled=enabled, images=images)
+                ok2, msg2 = save_tenant_settings_admin(access_token, tenant_id, settings)
+                if ok2:
+                    st.success(f"✅ {added} foto(s) enviada(s).")
+                    if errs:
+                        st.warning("Algumas falharam:")
+                        st.code("\n".join(errs))
+                    st.rerun()
+                else:
+                    st.error("Não consegui salvar o catálogo no banco.")
+                    st.code(msg2)
+
+            st.divider()
+            st.markdown("**Suas fotos**")
+            if not images:
+                st.info("Você ainda não enviou fotos.")
+            else:
+                # edição simples de legenda + remover
+                for idx, it in enumerate(list(images)):
+                    cols = st.columns([1.2, 1.8, 0.7])
+                    with cols[0]:
+                        st.image(it["url"], use_container_width=True)
+                    with cols[1]:
+                        new_caption = st.text_input(
+                            f"Legenda (opcional) • #{idx+1}",
+                            value=it.get("caption", ""),
+                            key=f"cap_{idx}_{it['path']}",
+                        )
+                        images[idx]["caption"] = new_caption.strip()
+                        st.caption(it["path"])
+                    with cols[2]:
+                        if st.button("🗑️ Remover", key=f"rm_{idx}_{it['path']}", use_container_width=True):
+                            okd, msgd = delete_catalog_image(access_token, it["path"])
+                            if not okd:
+                                st.error("Falha ao remover do Storage.")
+                                st.code(msgd)
+                            else:
+                                images.pop(idx)
+                                settings_set_catalog(settings, enabled=enabled, images=images)
+                                ok3, msg3 = save_tenant_settings_admin(access_token, tenant_id, settings)
+                                if ok3:
+                                    st.success("Removido.")
+                                    st.rerun()
+                                else:
+                                    st.error("Removi do Storage, mas não consegui atualizar o banco.")
+                                    st.code(msg3)
+
+                # salvar legendas/enable (sem upload)
+                st.divider()
+                c1, c2 = st.columns(2)
+                with c1:
+                    if st.button("💾 Salvar alterações do catálogo", use_container_width=True, type="primary"):
+                        settings_set_catalog(settings, enabled=enabled, images=images)
+                        ok4, msg4 = save_tenant_settings_admin(access_token, tenant_id, settings)
+                        if ok4:
+                            st.success("Catálogo atualizado!")
+                            st.rerun()
+                        else:
+                            st.error("Não consegui salvar.")
+                            st.code(msg4)
+                with c2:
+                    if st.button("Fechar", use_container_width=True):
+                        st.session_state.show_catalog = False
+                        st.rerun()
+
 # ============================================================
 # UI: MODO PÚBLICO (CLIENTE)
 # ============================================================
@@ -1048,12 +1168,10 @@ def tela_publica():
 
     nome_raw = (tenant.get("nome") or "").strip()
     if not nome_raw or nome_raw.lower() in ("minha loja", "minha agenda"):
-      nome_prof = "Profissional"
+        nome_prof = "Profissional"
     else:
-      nome_prof = nome_raw
+        nome_prof = nome_raw
 
-
-    # ✅ CLIENTE: sem slogan/marketing do produto
     st.markdown(f"##            **{nome_prof}**")
     st.caption("Escolha o serviço, o dia e o horário disponível.")
 
@@ -1067,15 +1185,14 @@ def tela_publica():
     pix_cidade = (tenant.get("pix_cidade") or "BRASIL").strip()
 
     if not whatsapp_num or len("".join([c for c in whatsapp_num if c.isdigit()])) < 10:
-      st.error("WhatsApp do profissional inválido. Peça para ele configurar no painel.")
-      st.stop()
-
-    if not whatsapp_num:
-        st.warning("WhatsApp deste profissional não configurado.")
+        st.error("WhatsApp do profissional inválido. Peça para ele configurar no painel.")
+        st.stop()
 
     settings = tenant.get("settings") if isinstance(tenant.get("settings"), dict) else {}
     services_map = settings_get_services(settings)
     working_hours = settings_get_working_hours(settings)
+
+    catalog = settings_get_catalog(settings)
 
     aba_agendar, aba_catalogo = st.tabs(["📅 Agendamento", "📒 Catálogo"])
 
@@ -1181,23 +1298,22 @@ def tela_publica():
 
     with aba_catalogo:
         st.subheader("📒 Catálogo")
-        try:
-            with open(CATALOGO_PDF, "rb") as f:
-                st.download_button("⬇️ Baixar catálogo (PDF)", data=f, file_name="catalogo.pdf", mime="application/pdf")
-        except FileNotFoundError:
-            st.info("Sem catálogo configurado.")
+        if not catalog["enabled"]:
+            st.info("Catálogo indisponível.")
+        elif not catalog["images"]:
+            st.info("Este profissional ainda não adicionou fotos no catálogo.")
         else:
-            with st.spinner("Carregando catálogo..."):
-                paginas = pdf_para_imagens_com_fundo_branco(CATALOGO_PDF, zoom=2.0)
-            for i, img_bytes in enumerate(paginas, start=1):
-                st.markdown(f"**Página {i}**")
-                st.image(img_bytes, use_container_width=True)
+            for i, it in enumerate(catalog["images"], start=1):
+                if it.get("caption"):
+                    st.markdown(f"**{it['caption']}**")
+                st.image(it["url"], use_container_width=True)
+                if i < len(catalog["images"]):
+                    st.divider()
 
 # ============================================================
 # UI: MODO ADMIN (PROFISSIONAL)
 # ============================================================
 def tela_admin():
-    # ✅ PROFISSIONAL: mostra hero / marketing do produto
     st.markdown(
         """
         <div style="padding:14px 6px 10px 6px;">
@@ -1275,12 +1391,10 @@ def tela_admin():
         st.error("⛔ Seu plano expirou. Renove para continuar usando.")
         st.stop()
 
-
     tenant_id = str(tenant.get("id"))
 
     menu_topo_comandos(access_token, tenant_id)
 
-    # Bloqueio SaaS (mantido)
     paid_until = parse_date_iso(tenant.get("paid_until"))
     hoje = date.today()
     pago = bool(paid_until and paid_until >= hoje)
@@ -1363,16 +1477,14 @@ def tela_admin():
     df_show["Preço do serviço"] = df_show["Preço do serviço"].apply(lambda v: fmt_brl(float(v)))
     df_show["Sinal"] = df_show["Sinal"].apply(lambda v: fmt_brl(float(v)))
     st.dataframe(
-    df_show.drop(columns=["id"]),
-    use_container_width=True,
-    height=360  # <- importante: não deixa a tabela "tomar" o scroll da página
+        df_show.drop(columns=["id"]),
+        use_container_width=True,
+        height=360
     )
+
     st.divider()
     st.subheader("⚡ Ações rápidas")
 
-# =========================
-# MARCAR COMO PAGO
-# =========================
     st.subheader("✅ Marcar como PAGO")
 
     ag_pagar = st.selectbox(
@@ -1391,9 +1503,6 @@ def tela_admin():
         st.success("Agendamento marcado como PAGO.")
         st.rerun()
 
-# =========================
-# EXCLUIR AGENDAMENTO
-# =========================
     st.subheader("🗑️ Excluir agendamento")
 
     ag_excluir = st.selectbox(
@@ -1407,6 +1516,12 @@ def tela_admin():
         key="excluir_select_unique",
     )
 
+    if st.button("Excluir agendamento", use_container_width=True):
+        excluir_agendamento_admin(access_token, tenant_id, int(ag_excluir))
+        st.success("Agendamento excluído.")
+        st.rerun()
+
+    st.divider()
     if st.button("🚀 Assinar plano", type="primary", use_container_width=True):
         try:
             if not URL_ASSINAR_PLANO:
@@ -1424,8 +1539,6 @@ def tela_admin():
                 timeout=20,
             )
 
-        # DEBUG
-
             data = resp.json() if resp.text else {}
 
             if resp.status_code != 200 or not data.get("ok") or not data.get("payment_url"):
@@ -1438,8 +1551,6 @@ def tela_admin():
         except Exception as e:
             st.error("Falha ao iniciar assinatura.")
             st.code(str(e))
-
-
 
 # ============================================================
 # ROUTER
