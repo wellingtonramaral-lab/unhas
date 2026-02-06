@@ -1407,24 +1407,6 @@ def tela_admin():
         key="excluir_select_unique",
     )
 
-    if st.button("Excluir agendamento", type="secondary"):
-        excluir_agendamento_admin(access_token, tenant_id, int(ag_excluir))
-        st.warning("Agendamento excluído.")
-        st.rerun()
-    st.subheader("💳 Renovação de plano")
-
-    if st.button("➕ Adicionar 30 dias"):
-            nova_data = renovar_plano_admin(access_token, tenant_id, dias=30)
-            st.success(f"Plano renovado até **{nova_data.strftime('%d/%m/%Y')}**")
-            st.rerun()
-            st.divider()
-    st.subheader("💳 Assinatura")
-
-    st.markdown(f"""
-    Plano mensal: **{SAAS_MENSAL_VALOR}**  
-    Pagamento automático via Pix ou Cartão.
-    """)
-
     if st.button("🚀 Assinar plano", type="primary", use_container_width=True):
         try:
             if not URL_ASSINAR_PLANO:
@@ -1453,7 +1435,6 @@ def tela_admin():
                 st.code(data)
             else:
                 st.success("Pagamento gerado ✅")
-                st.link_button("👉 Ir para pagamento", data["payment_url"], use_container_width=True)
 
         except Exception as e:
             st.error("Falha ao iniciar assinatura.")
