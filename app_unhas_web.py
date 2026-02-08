@@ -132,11 +132,10 @@ def apply_theme():
             background: rgba(255,255,255,.03);
             color: var(--muted);
             font-size: 0.9rem;}
-            /* ===============================
-             FIX iOS / SAFARI INPUTS
-             =============================== */
 
-            /* Força fundo escuro mesmo com autofill */
+        /* ===============================
+         FIX iOS / SAFARI INPUTS
+         =============================== */
         input,
         textarea,
         .stTextInput input,
@@ -147,25 +146,22 @@ def apply_theme():
           caret-color: #FFFFFF !important;
         }
 
-            /* Remove fundo branco do autofill (Safari / iOS) */
         input:-webkit-autofill,
         textarea:-webkit-autofill {
             -webkit-box-shadow: 0 0 0px 1000px rgba(15, 23, 42, 0.95) inset !important;
             box-shadow: 0 0 0px 1000px rgba(15, 23, 42, 0.95) inset !important;
-         -webkit-text-fill-color: #FFFFFF !important;
-         caret-color: #FFFFFF !important;
+            -webkit-text-fill-color: #FFFFFF !important;
+            caret-color: #FFFFFF !important;
         }
 
-            /* Placeholder legível */
         ::placeholder {
           color: rgba(255, 255, 255, 0.55) !important;
         }
 
-            /* Remove highlight branco ao focar */
         input:focus,
         textarea:focus {
           outline: none !important;
-            box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.45) !important;
+          box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.45) !important;
         }
 
         .chip b{ color: var(--text); }
@@ -239,15 +235,11 @@ def sb_user(access_token: str):
         }
     )
     sb = create_client(SUPABASE_URL, SUPABASE_ANON_KEY, options=opts)
-
-    # (Opcional) manter também no PostgREST, não atrapalha:
     try:
         sb.postgrest.auth(access_token)
     except Exception:
         pass
-
     return sb
-
 
 # ============================================================
 # HELPERS
@@ -461,7 +453,6 @@ def salvar_profile(access_token: str, dados: dict):
     return sb.table("profiles").update(dados).eq("id", uid).execute()
 
 def atualizar_tenant_whatsapp(sb_or_token, uid: str, tenant_id: str, whatsapp: str):
-    # compat: no arquivo original isso recebia sb; aqui aceito token ou sb
     sb = sb_or_token if hasattr(sb_or_token, "table") else sb_user(sb_or_token)
     w = (whatsapp or "").strip()
     return (
@@ -525,34 +516,37 @@ def settings_get_working_hours(settings: dict):
 # CATÁLOGO por tenant (settings)
 # settings["catalog"] = {
 #   "enabled": true,
-#   "images": [{"path": "...", "url": "...", "caption": "..."}, ...]
+#   "items": [{"type":"image"|"pdf", "path":"...", "url":"...", "caption":"..."}]
 # }
 # ----------------------------
 def settings_get_catalog(settings: dict):
     c = settings.get("catalog")
     if isinstance(c, dict):
         enabled = bool(c.get("enabled", True))
-        images = c.get("images")
-        if isinstance(images, list):
+        items = c.get("items")
+        if isinstance(items, list):
             clean = []
-            for it in images:
+            for it in items:
                 if not isinstance(it, dict):
                     continue
+                typ = str(it.get("type") or "image").strip().lower()
+                if typ not in ("image", "pdf"):
+                    typ = "image"
                 url = str(it.get("url") or "").strip()
                 path = str(it.get("path") or "").strip()
                 caption = str(it.get("caption") or "").strip()
                 if url and path:
-                    clean.append({"url": url, "path": path, "caption": caption})
-            return {"enabled": enabled, "images": clean}
-        return {"enabled": enabled, "images": []}
-    return {"enabled": True, "images": []}
+                    clean.append({"type": typ, "url": url, "path": path, "caption": caption})
+            return {"enabled": enabled, "items": clean}
+        return {"enabled": enabled, "items": []}
+    return {"enabled": True, "items": []}
 
-def settings_set_catalog(settings: dict, enabled: bool, images: list):
-    settings["catalog"] = {"enabled": bool(enabled), "images": images}
+def settings_set_catalog(settings: dict, enabled: bool, items: list):
+    settings["catalog"] = {"enabled": bool(enabled), "items": items}
     return settings
 
 # ============================================================
-# STORAGE (upload / delete) para catálogo
+# STORAGE (upload / delete) para catálogo (IMAGENS + PDF)
 # ============================================================
 def guess_content_type(filename: str) -> str:
     fn = (filename or "").lower()
@@ -560,53 +554,64 @@ def guess_content_type(filename: str) -> str:
         return "image/png"
     if fn.endswith(".webp"):
         return "image/webp"
+    if fn.endswith(".pdf"):
+        return "application/pdf"
     return "image/jpeg"
 
-def upload_catalog_image(access_token: str, tenant_id: str, uploaded_file) -> tuple[bool, str, dict]:
+def guess_item_type(filename: str) -> str:
+    fn = (filename or "").lower()
+    if fn.endswith(".pdf"):
+        return "pdf"
+    return "image"
+
+def sanitize_filename(name: str) -> str:
+    safe = "".join([c for c in (name or "") if c.isalnum() or c in ("-", "_", ".", " ")])
+    safe = safe.strip().replace(" ", "_")
+    return safe or "arquivo"
+
+def upload_catalog_file(access_token: str, tenant_id: str, uploaded_file) -> tuple[bool, str, dict]:
     """
     Upload direto no Supabase Storage via HTTP (respeita RLS com auth.uid()).
     Salva em: {tenant_id}/{timestamp}_{filename}
     """
     try:
         ts = datetime.now().strftime("%Y%m%d%H%M%S")
-        safe_name = "".join([c for c in (uploaded_file.name or "foto.jpg") if c.isalnum() or c in ("-", "_", ".", " ")])
-        safe_name = safe_name.strip().replace(" ", "_") or "foto.jpg"
+        safe_name = sanitize_filename(uploaded_file.name)
+
+        # garante extensão
+        if "." not in safe_name:
+            safe_name += ".jpg"
 
         path = f"{tenant_id}/{ts}_{safe_name}"
         content_type = guess_content_type(safe_name)
+        item_type = guess_item_type(safe_name)
         file_bytes = uploaded_file.getvalue()
 
-        # Endpoint do Storage
-        # PUT é o método padrão para upload de objeto
         url = f"{SUPABASE_URL}/storage/v1/object/{CATALOGO_BUCKET}/{path}"
 
         headers = {
             "Authorization": f"Bearer {access_token}",
             "apikey": SUPABASE_ANON_KEY,
             "Content-Type": str(content_type),
-            "x-upsert": "true",
+            "x-upsert": "true",  # precisa UPDATE policy no Storage
         }
 
         resp = requests.put(url, headers=headers, data=file_bytes, timeout=30)
 
         if resp.status_code not in (200, 201):
-            # Storage geralmente devolve JSON com error/message
             try:
                 return False, str(resp.json()), {}
             except Exception:
                 return False, f"HTTP {resp.status_code}: {resp.text}", {}
 
-        # Bucket público => URL pública direta
         public_url = f"{SUPABASE_URL}/storage/v1/object/public/{CATALOGO_BUCKET}/{path}"
-        item = {"path": path, "url": public_url, "caption": ""}
+        item = {"type": item_type, "path": path, "url": public_url, "caption": ""}
         return True, "", item
 
     except Exception as e:
         return False, str(e), {}
 
-
-
-def delete_catalog_image(access_token: str, path: str) -> tuple[bool, str]:
+def delete_catalog_item(access_token: str, path: str) -> tuple[bool, str]:
     try:
         if not path:
             return False, "path vazio"
@@ -628,6 +633,21 @@ def delete_catalog_image(access_token: str, path: str) -> tuple[bool, str]:
 
     except Exception as e:
         return False, str(e)
+
+def delete_catalog_all(access_token: str, items: list) -> tuple[int, list]:
+    """
+    Remove tudo do storage (melhor esforço). Retorna (removidos, erros[])
+    """
+    removed = 0
+    errs = []
+    for it in list(items or []):
+        path = (it or {}).get("path")
+        ok, msg = delete_catalog_item(access_token, path)
+        if ok:
+            removed += 1
+        else:
+            errs.append(f"{path}: {msg}")
+    return removed, errs
 
 # ============================================================
 # TENANT LOAD (público / admin)
@@ -941,7 +961,7 @@ def menu_topo_comandos(access_token: str, tenant_id: str):
             st.session_state.show_hours = False
             st.session_state.show_catalog = False
 
-        if st.button("📒 Catálogo (fotos)", use_container_width=True):
+        if st.button("📒 Catálogo (fotos/PDF)", use_container_width=True):
             st.session_state.show_catalog = True
             st.session_state.show_profile = False
             st.session_state.show_copy = False
@@ -1102,43 +1122,65 @@ def menu_topo_comandos(access_token: str, tenant_id: str):
                     st.rerun()
 
     # ==========================
-    # CATÁLOGO (fotos) - ADMIN
+    # CATÁLOGO (fotos + PDF) - ADMIN
     # ==========================
     if st.session_state.show_catalog:
         with st.container(border=True):
-            st.markdown("### 📒 Catálogo (fotos)")
-            st.caption("Envie fotos do seu trabalho. Elas aparecem automaticamente no seu link público.")
+            st.markdown("### 📒 Catálogo (fotos / PDF)")
+            st.caption("Envie fotos e/ou PDFs (ex: tabela de preços, portfólio). Aparecem no link público.")
 
             catalog = settings_get_catalog(settings)
             enabled = st.checkbox("Mostrar catálogo no link público", value=catalog["enabled"])
-            images = catalog["images"]
+            items = catalog["items"]
 
             st.divider()
-            st.markdown("**Adicionar fotos**")
+
+            # Botão limpar tudo
+            colA, colB = st.columns([1, 1])
+            with colA:
+                if st.button("🧹 Limpar catálogo inteiro (apagar tudo)", use_container_width=True):
+                    removed, errs = delete_catalog_all(access_token, items)
+                    items = []
+                    settings_set_catalog(settings, enabled=enabled, items=items)
+                    okx, msgx = save_tenant_settings_admin(access_token, tenant_id, settings)
+                    if okx:
+                        st.success(f"Catálogo limpo! Removidos do Storage: {removed}")
+                        if errs:
+                            st.warning("Alguns arquivos não consegui remover (melhor esforço):")
+                            st.code("\n".join(errs))
+                        st.rerun()
+                    else:
+                        st.error("Apaguei do Storage (ou tentei), mas não consegui salvar settings.")
+                        st.code(msgx)
+
+            with colB:
+                st.caption("Dica: use isso para trocar o catálogo inteiro por outro.")
+
+            st.markdown("**Adicionar arquivos**")
             up = st.file_uploader(
-                "Selecione 1 ou mais imagens (JPG/PNG/WEBP)",
-                type=["jpg", "jpeg", "png", "webp"],
+                "Selecione 1 ou mais arquivos (JPG/PNG/WEBP/PDF)",
+                type=["jpg", "jpeg", "png", "webp", "pdf"],
                 accept_multiple_files=True,
                 label_visibility="collapsed",
             )
 
-            if st.button("⬆️ Enviar fotos", type="primary", use_container_width=True, disabled=not up):
+            if st.button("⬆️ Enviar arquivos", type="primary", use_container_width=True, disabled=not up):
                 added = 0
                 errs = []
                 for f in (up or []):
-                    ok, msg, item = upload_catalog_image(access_token, tenant_id, f)
+                    ok, msg, item = upload_catalog_file(access_token, tenant_id, f)
                     if ok and item:
-                        images.append(item)
+                        items.append(item)
                         added += 1
                     else:
                         errs.append(f"{f.name}: {msg}")
 
-                settings_set_catalog(settings, enabled=enabled, images=images)
+                settings_set_catalog(settings, enabled=enabled, items=items)
                 ok2, msg2 = save_tenant_settings_admin(access_token, tenant_id, settings)
                 if ok2:
-                    st.success(f"✅ {added} foto(s) enviada(s).")
+                    st.success(f"✅ {added} arquivo(s) enviado(s).")
                     if errs:
-                        st.warning("Algumas falharam:")
+                        st.warning("Alguns falharam:")
                         st.code("\n".join(errs))
                     st.rerun()
                 else:
@@ -1146,32 +1188,37 @@ def menu_topo_comandos(access_token: str, tenant_id: str):
                     st.code(msg2)
 
             st.divider()
-            st.markdown("**Suas fotos**")
-            if not images:
-                st.info("Você ainda não enviou fotos.")
+            st.markdown("**Seus arquivos**")
+            if not items:
+                st.info("Você ainda não enviou nada.")
             else:
-                # edição simples de legenda + remover
-                for idx, it in enumerate(list(images)):
+                for idx, it in enumerate(list(items)):
                     cols = st.columns([1.2, 1.8, 0.7])
                     with cols[0]:
-                        st.image(it["url"], use_container_width=True)
+                        if it["type"] == "image":
+                            st.image(it["url"], use_container_width=True)
+                        else:
+                            st.markdown("📄 **PDF**")
+                            st.link_button("Abrir PDF", it["url"], use_container_width=True)
+
                     with cols[1]:
                         new_caption = st.text_input(
                             f"Legenda (opcional) • #{idx+1}",
                             value=it.get("caption", ""),
                             key=f"cap_{idx}_{it['path']}",
                         )
-                        images[idx]["caption"] = new_caption.strip()
+                        items[idx]["caption"] = new_caption.strip()
                         st.caption(it["path"])
+
                     with cols[2]:
                         if st.button("🗑️ Remover", key=f"rm_{idx}_{it['path']}", use_container_width=True):
-                            okd, msgd = delete_catalog_image(access_token, it["path"])
+                            okd, msgd = delete_catalog_item(access_token, it["path"])
                             if not okd:
                                 st.error("Falha ao remover do Storage.")
                                 st.code(msgd)
                             else:
-                                images.pop(idx)
-                                settings_set_catalog(settings, enabled=enabled, images=images)
+                                items.pop(idx)
+                                settings_set_catalog(settings, enabled=enabled, items=items)
                                 ok3, msg3 = save_tenant_settings_admin(access_token, tenant_id, settings)
                                 if ok3:
                                     st.success("Removido.")
@@ -1180,12 +1227,11 @@ def menu_topo_comandos(access_token: str, tenant_id: str):
                                     st.error("Removi do Storage, mas não consegui atualizar o banco.")
                                     st.code(msg3)
 
-                # salvar legendas/enable (sem upload)
                 st.divider()
                 c1, c2 = st.columns(2)
                 with c1:
                     if st.button("💾 Salvar alterações do catálogo", use_container_width=True, type="primary"):
-                        settings_set_catalog(settings, enabled=enabled, images=images)
+                        settings_set_catalog(settings, enabled=enabled, items=items)
                         ok4, msg4 = save_tenant_settings_admin(access_token, tenant_id, settings)
                         if ok4:
                             st.success("Catálogo atualizado!")
@@ -1341,14 +1387,22 @@ def tela_publica():
         st.subheader("📒 Catálogo")
         if not catalog["enabled"]:
             st.info("Catálogo indisponível.")
-        elif not catalog["images"]:
-            st.info("Este profissional ainda não adicionou fotos no catálogo.")
+        elif not catalog["items"]:
+            st.info("Este profissional ainda não adicionou arquivos no catálogo.")
         else:
-            for i, it in enumerate(catalog["images"], start=1):
-                if it.get("caption"):
-                    st.markdown(f"**{it['caption']}**")
-                st.image(it["url"], use_container_width=True)
-                if i < len(catalog["images"]):
+            for i, it in enumerate(catalog["items"], start=1):
+                caption = (it.get("caption") or "").strip()
+                if caption:
+                    st.markdown(f"**{caption}**")
+
+                if it.get("type") == "pdf":
+                    st.markdown("📄 **PDF**")
+                    st.link_button("Abrir PDF", it["url"], use_container_width=True)
+                    st.markdown(f"[Link direto]({it['url']})")
+                else:
+                    st.image(it["url"], use_container_width=True)
+
+                if i < len(catalog["items"]):
                     st.divider()
 
 # ============================================================
@@ -1402,6 +1456,9 @@ def tela_admin():
         st.warning("Sessão expirada. Faça login novamente.")
         auth_logout()
         st.stop()
+
+    # mantém também em session_state para compat com teu carregar_profile atual
+    st.session_state["user"] = {"id": user.id, "email": user.email}
 
     tenant = carregar_tenant_admin(access_token)
     if not tenant:
