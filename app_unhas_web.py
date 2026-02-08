@@ -132,10 +132,10 @@ def apply_theme():
             background: rgba(255,255,255,.03);
             color: var(--muted);
             font-size: 0.9rem;}
+            /* ===============================
+             FIX iOS / SAFARI INPUTS
+             =============================== */
 
-        /* ===============================
-         FIX iOS / SAFARI INPUTS
-         =============================== */
         input,
         textarea,
         .stTextInput input,
@@ -150,8 +150,8 @@ def apply_theme():
         textarea:-webkit-autofill {
             -webkit-box-shadow: 0 0 0px 1000px rgba(15, 23, 42, 0.95) inset !important;
             box-shadow: 0 0 0px 1000px rgba(15, 23, 42, 0.95) inset !important;
-            -webkit-text-fill-color: #FFFFFF !important;
-            caret-color: #FFFFFF !important;
+         -webkit-text-fill-color: #FFFFFF !important;
+         caret-color: #FFFFFF !important;
         }
 
         ::placeholder {
@@ -161,7 +161,7 @@ def apply_theme():
         input:focus,
         textarea:focus {
           outline: none !important;
-          box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.45) !important;
+            box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.45) !important;
         }
 
         .chip b{ color: var(--text); }
@@ -226,19 +226,19 @@ VALOR_SINAL_FIXO = 20.0
 def sb_anon():
     return create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
 
-from supabase import create_client, ClientOptions
+from supabase import ClientOptions
 
 def sb_user(access_token: str):
     opts = ClientOptions(
-        headers={
-            "Authorization": f"Bearer {access_token}"
-        }
+        headers={"Authorization": f"Bearer {access_token}"}
     )
     sb = create_client(SUPABASE_URL, SUPABASE_ANON_KEY, options=opts)
+
     try:
         sb.postgrest.auth(access_token)
     except Exception:
         pass
+
     return sb
 
 # ============================================================
@@ -516,7 +516,7 @@ def settings_get_working_hours(settings: dict):
 # CATÁLOGO por tenant (settings)
 # settings["catalog"] = {
 #   "enabled": true,
-#   "items": [{"type":"image"|"pdf", "path":"...", "url":"...", "caption":"..."}]
+#   "items": [{"type":"image|pdf","path":"...","url":"...","caption":""}, ...]
 # }
 # ----------------------------
 def settings_get_catalog(settings: dict):
@@ -529,7 +529,7 @@ def settings_get_catalog(settings: dict):
             for it in items:
                 if not isinstance(it, dict):
                     continue
-                typ = str(it.get("type") or "image").strip().lower()
+                typ = str(it.get("type") or "image").lower().strip()
                 if typ not in ("image", "pdf"):
                     typ = "image"
                 url = str(it.get("url") or "").strip()
@@ -546,7 +546,7 @@ def settings_set_catalog(settings: dict, enabled: bool, items: list):
     return settings
 
 # ============================================================
-# STORAGE (upload / delete) para catálogo (IMAGENS + PDF)
+# STORAGE (upload / delete) para catálogo (IMAGEM + PDF)
 # ============================================================
 def guess_content_type(filename: str) -> str:
     fn = (filename or "").lower()
@@ -559,41 +559,33 @@ def guess_content_type(filename: str) -> str:
     return "image/jpeg"
 
 def guess_item_type(filename: str) -> str:
-    fn = (filename or "").lower()
-    if fn.endswith(".pdf"):
-        return "pdf"
-    return "image"
+    return "pdf" if (filename or "").lower().endswith(".pdf") else "image"
 
 def sanitize_filename(name: str) -> str:
     safe = "".join([c for c in (name or "") if c.isalnum() or c in ("-", "_", ".", " ")])
     safe = safe.strip().replace(" ", "_")
     return safe or "arquivo"
 
-def upload_catalog_file(access_token: str, tenant_id: str, uploaded_file) -> tuple[bool, str, dict]:
+def upload_catalog_file(access_token: str, tenant_id: str, uploaded_file):
     """
-    Upload direto no Supabase Storage via HTTP (respeita RLS com auth.uid()).
+    Upload direto no Supabase Storage via HTTP (RLS com auth.uid()).
     Salva em: {tenant_id}/{timestamp}_{filename}
+    IMPORTANTE: sem x-upsert (não exige UPDATE policy)
     """
     try:
         ts = datetime.now().strftime("%Y%m%d%H%M%S")
-        safe_name = sanitize_filename(uploaded_file.name)
-
-        # garante extensão
-        if "." not in safe_name:
-            safe_name += ".jpg"
-
+        safe_name = sanitize_filename(uploaded_file.name or "arquivo")
         path = f"{tenant_id}/{ts}_{safe_name}"
+
         content_type = guess_content_type(safe_name)
         item_type = guess_item_type(safe_name)
         file_bytes = uploaded_file.getvalue()
 
         url = f"{SUPABASE_URL}/storage/v1/object/{CATALOGO_BUCKET}/{path}"
-
         headers = {
             "Authorization": f"Bearer {access_token}",
             "apikey": SUPABASE_ANON_KEY,
             "Content-Type": str(content_type),
-            "x-upsert": "true",  # precisa UPDATE policy no Storage
         }
 
         resp = requests.put(url, headers=headers, data=file_bytes, timeout=30)
@@ -611,7 +603,7 @@ def upload_catalog_file(access_token: str, tenant_id: str, uploaded_file) -> tup
     except Exception as e:
         return False, str(e), {}
 
-def delete_catalog_item(access_token: str, path: str) -> tuple[bool, str]:
+def delete_catalog_item(access_token: str, path: str):
     try:
         if not path:
             return False, "path vazio"
@@ -630,14 +622,10 @@ def delete_catalog_item(access_token: str, path: str) -> tuple[bool, str]:
                 return False, f"HTTP {resp.status_code}: {resp.text}"
 
         return True, ""
-
     except Exception as e:
         return False, str(e)
 
-def delete_catalog_all(access_token: str, items: list) -> tuple[int, list]:
-    """
-    Remove tudo do storage (melhor esforço). Retorna (removidos, erros[])
-    """
+def delete_catalog_all(access_token: str, items: list):
     removed = 0
     errs = []
     for it in list(items or []):
@@ -796,7 +784,7 @@ def inserir_pre_agendamento_publico(
         return None
 
 # ============================================================
-# ADMIN: AGENDAMENTOS
+# ADMIN: AGENDAMENTOS (mantido do seu código)
 # ============================================================
 def listar_agendamentos_admin(access_token: str, tenant_id: str):
     sb = sb_user(access_token)
@@ -920,7 +908,7 @@ def horarios_do_dia_com_settings(d: date, working_hours: dict):
     return working_hours.get(wd, [])
 
 # ============================================================
-# MENU (expander) com itens
+# MENU (expander) com itens (mantido, com catálogo atualizado)
 # ============================================================
 def menu_topo_comandos(access_token: str, tenant_id: str):
     settings = get_tenant_settings_admin(access_token, tenant_id)
@@ -1122,20 +1110,17 @@ def menu_topo_comandos(access_token: str, tenant_id: str):
                     st.rerun()
 
     # ==========================
-    # CATÁLOGO (fotos + PDF) - ADMIN
+    # CATÁLOGO (fotos/PDF) - ADMIN
     # ==========================
     if st.session_state.show_catalog:
         with st.container(border=True):
-            st.markdown("### 📒 Catálogo (fotos / PDF)")
-            st.caption("Envie fotos e/ou PDFs (ex: tabela de preços, portfólio). Aparecem no link público.")
+            st.markdown("### 📒 Catálogo (fotos e PDF)")
+            st.caption("Envie fotos do seu trabalho ou um PDF. Aparece automaticamente no seu link público.")
 
             catalog = settings_get_catalog(settings)
             enabled = st.checkbox("Mostrar catálogo no link público", value=catalog["enabled"])
             items = catalog["items"]
 
-            st.divider()
-
-            # Botão limpar tudo
             colA, colB = st.columns([1, 1])
             with colA:
                 if st.button("🧹 Limpar catálogo inteiro (apagar tudo)", use_container_width=True):
@@ -1144,18 +1129,16 @@ def menu_topo_comandos(access_token: str, tenant_id: str):
                     settings_set_catalog(settings, enabled=enabled, items=items)
                     okx, msgx = save_tenant_settings_admin(access_token, tenant_id, settings)
                     if okx:
-                        st.success(f"Catálogo limpo! Removidos do Storage: {removed}")
+                        st.success(f"Catálogo limpo! Removidos: {removed}")
                         if errs:
-                            st.warning("Alguns arquivos não consegui remover (melhor esforço):")
+                            st.warning("Alguns arquivos falharam ao remover (melhor esforço):")
                             st.code("\n".join(errs))
                         st.rerun()
                     else:
-                        st.error("Apaguei do Storage (ou tentei), mas não consegui salvar settings.")
+                        st.error("Não consegui salvar settings após limpar.")
                         st.code(msgx)
 
-            with colB:
-                st.caption("Dica: use isso para trocar o catálogo inteiro por outro.")
-
+            st.divider()
             st.markdown("**Adicionar arquivos**")
             up = st.file_uploader(
                 "Selecione 1 ou mais arquivos (JPG/PNG/WEBP/PDF)",
@@ -1195,11 +1178,11 @@ def menu_topo_comandos(access_token: str, tenant_id: str):
                 for idx, it in enumerate(list(items)):
                     cols = st.columns([1.2, 1.8, 0.7])
                     with cols[0]:
-                        if it["type"] == "image":
-                            st.image(it["url"], use_container_width=True)
-                        else:
+                        if it.get("type") == "pdf":
                             st.markdown("📄 **PDF**")
                             st.link_button("Abrir PDF", it["url"], use_container_width=True)
+                        else:
+                            st.image(it["url"], use_container_width=True)
 
                     with cols[1]:
                         new_caption = st.text_input(
@@ -1398,7 +1381,6 @@ def tela_publica():
                 if it.get("type") == "pdf":
                     st.markdown("📄 **PDF**")
                     st.link_button("Abrir PDF", it["url"], use_container_width=True)
-                    st.markdown(f"[Link direto]({it['url']})")
                 else:
                     st.image(it["url"], use_container_width=True)
 
@@ -1456,9 +1438,6 @@ def tela_admin():
         st.warning("Sessão expirada. Faça login novamente.")
         auth_logout()
         st.stop()
-
-    # mantém também em session_state para compat com teu carregar_profile atual
-    st.session_state["user"] = {"id": user.id, "email": user.email}
 
     tenant = carregar_tenant_admin(access_token)
     if not tenant:
