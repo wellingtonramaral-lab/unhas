@@ -6,6 +6,8 @@ import requests
 import fitz  # PyMuPDF
 from PIL import Image
 import io
+import re
+import unicodedata
 from supabase import create_client
 
 # ============================================================
@@ -260,6 +262,22 @@ DEFAULT_WORKING_HOURS = {
 }
 
 VALOR_SINAL_FIXO = 20.0
+
+# ============================================================
+# STATUS (Admin + Público)
+# ============================================================
+STATUS_ALL = ["pendente", "pago", "finalizado", "cancelado"]
+STATUS_LABELS = {
+    "pendente": "🟡 pendente",
+    "pago": "🔵 pago",
+    "finalizado": "🟢 finalizado",
+    "cancelado": "🔴 cancelado",
+}
+STATUS_SORT = {"pendente": 0, "pago": 1, "finalizado": 2, "cancelado": 3}
+
+def norm_status(s: str) -> str:
+    s = (s or "").strip().lower()
+    return s if s in STATUS_ALL else (s or "pendente")
 
 # ============================================================
 # SUPABASE CLIENTS
@@ -591,9 +609,27 @@ def guess_item_type(filename: str) -> str:
     return "pdf" if (filename or "").lower().endswith(".pdf") else "image"
 
 def sanitize_filename(name: str) -> str:
-    safe = "".join([c for c in (name or "") if c.isalnum() or c in ("-", "_", ".", " ")])
-    safe = safe.strip().replace(" ", "_")
-    return safe or "arquivo"
+    """
+    Normaliza para ASCII + permite apenas caracteres seguros.
+    Evita 400 InvalidKey no Storage.
+    """
+    base = (name or "").strip()
+    if not base:
+        return "arquivo"
+
+    # remove acentos / normaliza
+    base = unicodedata.normalize("NFKD", base)
+    base = base.encode("ascii", "ignore").decode("ascii")
+
+    # troca espaços por _
+    base = base.replace(" ", "_")
+
+    # remove tudo que não é seguro
+    base = re.sub(r"[^A-Za-z0-9._-]", "", base)
+
+    # evita nome vazio
+    base = base.strip("._-")
+    return base or "arquivo"
 
 def upload_catalog_file(access_token: str, tenant_id: str, uploaded_file):
     """
@@ -746,8 +782,11 @@ def horarios_ocupados_publico(tenant_id: str, data_escolhida: date):
 
         for r in rows:
             horario = r.get("horario")
-            status = (r.get("status") or "").lower().strip()
-            created_at = parse_dt(r.get("created_at", ""))
+            status = norm_status(r.get("status"))
+
+            # cancelado NÃO ocupa
+            if status == "cancelado":
+                continue
 
             if status in ("pago", "finalizado"):
                 ocupados.add(horario)
@@ -757,6 +796,7 @@ def horarios_ocupados_publico(tenant_id: str, data_escolhida: date):
                 if TEMPO_EXPIRACAO_MIN <= 0:
                     ocupados.add(horario)
                 else:
+                    created_at = parse_dt(r.get("created_at", ""))
                     if created_at is None:
                         ocupados.add(horario)
                     else:
@@ -843,19 +883,30 @@ def listar_agendamentos_admin(access_token: str, tenant_id: str):
     )
     df["Data"] = df["Data"].astype(str)
     df["Horário"] = df["Horário"].astype(str)
-    df["Status"] = df["Status"].astype(str)
+    df["Status"] = df["Status"].astype(str).apply(norm_status)
     df["Sinal"] = df["Sinal"].apply(lambda x: float(x) if x is not None else 0.0)
     return df
 
-def marcar_como_pago_admin(access_token: str, tenant_id: str, ag_id: int):
+def marcar_status_admin(access_token: str, tenant_id: str, ag_id: int, novo_status: str):
+    novo_status = norm_status(novo_status)
     sb = sb_user(access_token)
-    return sb.table("agendamentos").update({"status": "pago"}).eq("tenant_id", str(tenant_id)).eq("id", ag_id).execute()
+    return (
+        sb.table("agendamentos")
+        .update({"status": novo_status})
+        .eq("tenant_id", str(tenant_id))
+        .eq("id", ag_id)
+        .execute()
+    )
 
 def excluir_agendamento_admin(access_token: str, tenant_id: str, ag_id: int):
     sb = sb_user(access_token)
     return sb.table("agendamentos").delete().eq("tenant_id", str(tenant_id)).eq("id", ag_id).execute()
 
 def atualizar_finalizados_admin(access_token: str, tenant_id: str):
+    """
+    Converte 'pago' -> 'finalizado' quando o horário já passou.
+    (cancelado fica cancelado)
+    """
     try:
         sb = sb_user(access_token)
         hoje = date.today().isoformat()
@@ -1538,7 +1589,11 @@ def tela_admin():
             return calcular_total_servicos(servs, services_map)
 
         df_admin["Preço do serviço"] = df_admin["Serviço(s)"].apply(total_from_text).astype(float)
+        df_admin["Status_norm"] = df_admin["Status"].apply(norm_status)
+        df_admin["Status_label"] = df_admin["Status_norm"].apply(lambda s: STATUS_LABELS.get(s, s))
+        df_admin["status_ord"] = df_admin["Status_norm"].apply(lambda s: STATUS_SORT.get(s, 99))
 
+        # --------- filtros ---------
         colp1, colp2, colp3 = st.columns([1, 1, 1])
         with colp1:
             periodo = st.selectbox("Período", ["Tudo", "Mês", "Ano"], index=0)
@@ -1565,60 +1620,107 @@ def tela_admin():
         elif periodo == "Ano":
             df_filtrado = df_filtrado[df_filtrado["Data_dt"].dt.year == int(ano_sel)]
 
-        filtrar_status = st.checkbox("Filtrar por status")
+        filtrar_status = st.checkbox("Filtrar por status", value=True)
         if filtrar_status:
-            status_sel = st.selectbox("Status", ["pendente", "pago", "finalizado"])
-            df_filtrado = df_filtrado[df_filtrado["Status"].str.lower() == status_sel]
+            escolhas = ["Todos"] + [STATUS_LABELS[s] for s in STATUS_ALL]
+            sel = st.multiselect("Status", escolhas, default=["Todos"])
+            if "Todos" not in sel:
+                # converte labels -> status_norm
+                label_to_norm = {STATUS_LABELS[s]: s for s in STATUS_ALL}
+                wanted = [label_to_norm[x] for x in sel if x in label_to_norm]
+                if wanted:
+                    df_filtrado = df_filtrado[df_filtrado["Status_norm"].isin(wanted)]
 
-        total_servicos = float(df_filtrado["Preço do serviço"].sum()) if not df_filtrado.empty else 0.0
+        # --------- KPIs úteis ---------
+        total_gerado = float(df_filtrado["Preço do serviço"].sum()) if not df_filtrado.empty else 0.0
         total_sinais = float(df_filtrado["Sinal"].sum()) if not df_filtrado.empty else 0.0
         qtd = int(len(df_filtrado))
 
-        m1, m2, m3 = st.columns(3)
-        m1.metric("Quantidade", f"{qtd}")
-        m2.metric("Total serviços", fmt_brl(total_servicos))
-        m3.metric("Total sinais", fmt_brl(total_sinais))
+        recebido = float(df_filtrado[df_filtrado["Status_norm"].isin(["pago", "finalizado"])]["Preço do serviço"].sum()) if not df_filtrado.empty else 0.0
+        a_receber = float(df_filtrado[df_filtrado["Status_norm"].isin(["pendente"])]["Preço do serviço"].sum()) if not df_filtrado.empty else 0.0
+        cancelados_qtd = int((df_filtrado["Status_norm"] == "cancelado").sum()) if not df_filtrado.empty else 0
 
-        df_show = df_filtrado.drop(columns=["Data_dt"]).copy()
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("Quantidade", f"{qtd}")
+        m2.metric("Recebido", fmt_brl(recebido))
+        m3.metric("A receber", fmt_brl(a_receber))
+        m4.metric("Cancelados", f"{cancelados_qtd}")
+
+        # extras (mantém valor percebido sem poluir)
+        ex1, ex2 = st.columns(2)
+        ex1.metric("Total serviços (gerado)", fmt_brl(total_gerado))
+        ex2.metric("Total sinais", fmt_brl(total_sinais))
+
+        # --------- tabela (mais legível) ---------
+        df_show = df_filtrado.sort_values(["Data_dt", "Horário", "status_ord"], ascending=[True, True, True]).copy()
+        df_show = df_show.drop(columns=["Data_dt"]).copy()
         df_show["Preço do serviço"] = df_show["Preço do serviço"].apply(lambda v: fmt_brl(float(v)))
         df_show["Sinal"] = df_show["Sinal"].apply(lambda v: fmt_brl(float(v)))
+        df_show["Status"] = df_show["Status_label"]
+
+        # remove colunas técnicas
+        drop_cols = [c for c in ["Status_norm", "Status_label", "status_ord"] if c in df_show.columns]
+        df_show = df_show.drop(columns=drop_cols)
+
         st.dataframe(
             df_show.drop(columns=["id"]),
             use_container_width=True,
             height=360
         )
 
+        # ====================================================
+        # AÇÕES RÁPIDAS (com cancelado incluído)
+        # ====================================================
         st.divider()
         st.subheader("⚡ Ações rápidas")
 
-        st.subheader("✅ Marcar como PAGO")
+        def fmt_ag(ag_id: int) -> str:
+            row = df_admin[df_admin.id == ag_id]
+            if row.empty:
+                return str(ag_id)
+            r = row.iloc[0]
+            return f"{r['Cliente']} • {r['Data']} {r['Horário']} • {STATUS_LABELS.get(r['Status_norm'], r['Status_norm'])}"
 
-        ag_pagar = st.selectbox(
-            "Selecione o agendamento",
-            df_admin["id"],
-            format_func=lambda x: (
-                f"{df_admin[df_admin.id == x]['Cliente'].values[0]} • "
-                f"{df_admin[df_admin.id == x]['Data'].values[0]} "
-                f"{df_admin[df_admin.id == x]['Horário'].values[0]}"
-            ),
-            key="pagar_select",
-        )
+        colA, colB = st.columns(2)
 
-        if st.button("Marcar como PAGO", type="primary"):
-            marcar_como_pago_admin(access_token, tenant_id, int(ag_pagar))
-            st.success("Agendamento marcado como PAGO.")
-            st.rerun()
+        with colA:
+            st.subheader("✅ Marcar como PAGO")
+            # recomenda mostrar primeiro pendentes
+            pendentes_ids = df_admin[df_admin["Status_norm"] == "pendente"]["id"].tolist()
+            ids_para_pagar = pendentes_ids if pendentes_ids else df_admin["id"].tolist()
+
+            ag_pagar = st.selectbox(
+                "Selecione o agendamento",
+                ids_para_pagar,
+                format_func=fmt_ag,
+                key="pagar_select",
+            )
+            if st.button("Marcar como PAGO", type="primary", use_container_width=True):
+                marcar_status_admin(access_token, tenant_id, int(ag_pagar), "pago")
+                st.success("Agendamento marcado como PAGO.")
+                st.rerun()
+
+        with colB:
+            st.subheader("❌ Marcar como CANCELADO")
+            # pendente/pago/finalizado podem virar cancelado (você decide regra; aqui deixei liberar)
+            ids_cancel = df_admin[df_admin["Status_norm"] != "cancelado"]["id"].tolist() or df_admin["id"].tolist()
+
+            ag_cancel = st.selectbox(
+                "Selecione o agendamento",
+                ids_cancel,
+                format_func=fmt_ag,
+                key="cancel_select",
+            )
+            if st.button("Marcar como CANCELADO", use_container_width=True):
+                marcar_status_admin(access_token, tenant_id, int(ag_cancel), "cancelado")
+                st.success("Agendamento marcado como CANCELADO.")
+                st.rerun()
 
         st.subheader("🗑️ Excluir agendamento")
-
         ag_excluir = st.selectbox(
             "Selecione para excluir",
             df_admin["id"],
-            format_func=lambda x: (
-                f"{df_admin[df_admin.id == x]['Cliente'].values[0]} • "
-                f"{df_admin[df_admin.id == x]['Data'].values[0]} "
-                f"{df_admin[df_admin.id == x]['Horário'].values[0]}"
-            ),
+            format_func=fmt_ag,
             key="excluir_select_unique",
         )
 
