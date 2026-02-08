@@ -43,7 +43,22 @@ def apply_theme():
             --success: #22C55E;
             --shadow: 0 10px 30px rgba(0,0,0,.35);
         }
+        
+        .page-wrapper {
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
 
+        .page-content {
+            flex: 1;
+        }
+
+        .page-footer {
+            margin-top: auto;
+            padding-top: 20px;
+        }
+        
         .stApp{
             background:
               radial-gradient(1200px 600px at 10% 0%, rgba(56,189,248,.12), transparent 55%),
@@ -1432,6 +1447,9 @@ def tela_admin():
 
         st.stop()
 
+    st.markdown('<div class="page-wrapper">', unsafe_allow_html=True)
+    st.markdown('<div class="page-content">', unsafe_allow_html=True)
+
     access_token = st.session_state.access_token
     user = get_auth_user(access_token)
     if not user:
@@ -1628,6 +1646,14 @@ def tela_admin():
         except Exception as e:
             st.error("Falha ao iniciar assinatura.")
             st.code(str(e))
+            
+    st.markdown('</div>', unsafe_allow_html=True)  # fecha page-content
+    st.markdown('<div class="page-footer">', unsafe_allow_html=True)
+
+    if st.button("🚪 Sair", use_container_width=True):
+        auth_logout()
+
+    st.markdown('</div></div>', unsafe_allow_html=True)
 
 # ============================================================
 # ROUTER
