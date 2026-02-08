@@ -43,22 +43,7 @@ def apply_theme():
             --success: #22C55E;
             --shadow: 0 10px 30px rgba(0,0,0,.35);
         }
-        
-        .page-wrapper {
-            min-height: 100vh;
-            display: flex;
-            flex-direction: column;
-        }
 
-        .page-content {
-            flex: 1;
-        }
-
-        .page-footer {
-            margin-top: auto;
-            padding-top: 20px;
-        }
-        
         .stApp{
             background:
               radial-gradient(1200px 600px at 10% 0%, rgba(56,189,248,.12), transparent 55%),
@@ -146,11 +131,12 @@ def apply_theme():
             border-radius: 999px;
             background: rgba(255,255,255,.03);
             color: var(--muted);
-            font-size: 0.9rem;}
-            /* ===============================
-             FIX iOS / SAFARI INPUTS
-             =============================== */
+            font-size: 0.9rem;
+        }
 
+        /* ===============================
+           FIX iOS / SAFARI INPUTS
+           =============================== */
         input,
         textarea,
         .stTextInput input,
@@ -165,8 +151,8 @@ def apply_theme():
         textarea:-webkit-autofill {
             -webkit-box-shadow: 0 0 0px 1000px rgba(15, 23, 42, 0.95) inset !important;
             box-shadow: 0 0 0px 1000px rgba(15, 23, 42, 0.95) inset !important;
-         -webkit-text-fill-color: #FFFFFF !important;
-         caret-color: #FFFFFF !important;
+            -webkit-text-fill-color: #FFFFFF !important;
+            caret-color: #FFFFFF !important;
         }
 
         ::placeholder {
@@ -176,7 +162,7 @@ def apply_theme():
         input:focus,
         textarea:focus {
           outline: none !important;
-            box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.45) !important;
+          box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.45) !important;
         }
 
         .chip b{ color: var(--text); }
@@ -186,6 +172,46 @@ def apply_theme():
     )
 
 apply_theme()
+
+# ============================================================
+# PASSO 1 — Rodapé fixo com botão Sair (sem "espaço vazio")
+# ============================================================
+st.markdown("""
+<style>
+.footer-logout {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 14px 16px;
+  background: rgba(7, 11, 18, 0.70);
+  backdrop-filter: blur(8px);
+  border-top: 1px solid rgba(255,255,255,.10);
+  z-index: 9999;
+}
+
+.footer-logout a {
+  display: block;
+  text-align: center;
+  padding: 12px 14px;
+  border-radius: 14px;
+  text-decoration: none;
+  border: 1px solid rgba(255,255,255,.16);
+  background: rgba(255,255,255,.04);
+  color: rgba(255,255,255,.92);
+  font-weight: 700;
+}
+
+.footer-logout a:hover {
+  transform: translateY(-1px);
+  border-color: rgba(56, 189, 248, .55);
+  background: rgba(56, 189, 248, .10);
+}
+
+/* espaço para não esconder conteúdo atrás do rodapé */
+.block-container { padding-bottom: 110px !important; }
+</style>
+""", unsafe_allow_html=True)
 
 # ============================================================
 # SECRETS
@@ -244,16 +270,12 @@ def sb_anon():
 from supabase import ClientOptions
 
 def sb_user(access_token: str):
-    opts = ClientOptions(
-        headers={"Authorization": f"Bearer {access_token}"}
-    )
+    opts = ClientOptions(headers={"Authorization": f"Bearer {access_token}"})
     sb = create_client(SUPABASE_URL, SUPABASE_ANON_KEY, options=opts)
-
     try:
         sb.postgrest.auth(access_token)
     except Exception:
         pass
-
     return sb
 
 # ============================================================
@@ -267,14 +289,6 @@ def parse_dt(dt_str: str):
         return datetime.fromisoformat(dt_str)
     except Exception:
         return None
-
-def adicionar_dias_plano(paid_until, dias=30):
-    hoje = date.today()
-    if paid_until and paid_until >= hoje:
-        nova_data = paid_until + timedelta(days=dias)
-    else:
-        nova_data = hoje + timedelta(days=dias)
-    return nova_data
 
 def parse_date_iso(d):
     if not d:
@@ -799,7 +813,7 @@ def inserir_pre_agendamento_publico(
         return None
 
 # ============================================================
-# ADMIN: AGENDAMENTOS (mantido do seu código)
+# ADMIN: AGENDAMENTOS
 # ============================================================
 def listar_agendamentos_admin(access_token: str, tenant_id: str):
     sb = sb_user(access_token)
@@ -923,7 +937,7 @@ def horarios_do_dia_com_settings(d: date, working_hours: dict):
     return working_hours.get(wd, [])
 
 # ============================================================
-# MENU (expander) com itens (mantido, com catálogo atualizado)
+# MENU (expander) com itens
 # ============================================================
 def menu_topo_comandos(access_token: str, tenant_id: str):
     settings = get_tenant_settings_admin(access_token, tenant_id)
@@ -1276,7 +1290,6 @@ def tela_publica():
     settings = tenant.get("settings") if isinstance(tenant.get("settings"), dict) else {}
     services_map = settings_get_services(settings)
     working_hours = settings_get_working_hours(settings)
-
     catalog = settings_get_catalog(settings)
 
     aba_agendar, aba_catalogo = st.tabs(["📅 Agendamento", "📒 Catálogo"])
@@ -1406,6 +1419,11 @@ def tela_publica():
 # UI: MODO ADMIN (PROFISSIONAL)
 # ============================================================
 def tela_admin():
+    # ===== handler de logout via query param =====
+    if st.query_params.get("logout") == "1":
+        st.query_params.clear()
+        auth_logout()
+
     st.markdown(
         """
         <div style="padding:14px 6px 10px 6px;">
@@ -1446,9 +1464,6 @@ def tela_admin():
                     st.code(str(e))
 
         st.stop()
-
-    st.markdown('<div class="page-wrapper">', unsafe_allow_html=True)
-    st.markdown('<div class="page-content">', unsafe_allow_html=True)
 
     access_token = st.session_state.access_token
     user = get_auth_user(access_token)
@@ -1504,9 +1519,6 @@ def tela_admin():
 
     st.success("Acesso liberado ✅")
 
-    if st.button("Sair", use_container_width=True):
-        auth_logout()
-
     atualizar_finalizados_admin(access_token, tenant_id)
 
     st.divider()
@@ -1515,106 +1527,105 @@ def tela_admin():
     df_admin = listar_agendamentos_admin(access_token, tenant_id)
     if df_admin.empty:
         st.info("Nenhum agendamento encontrado.")
-        return
+    else:
+        df_admin["Data_dt"] = pd.to_datetime(df_admin["Data"], errors="coerce")
 
-    df_admin["Data_dt"] = pd.to_datetime(df_admin["Data"], errors="coerce")
+        settings = get_tenant_settings_admin(access_token, tenant_id)
+        services_map = settings_get_services(settings)
 
-    settings = get_tenant_settings_admin(access_token, tenant_id)
-    services_map = settings_get_services(settings)
+        def total_from_text(texto_servico: str) -> float:
+            servs = texto_para_lista_servicos(texto_servico)
+            return calcular_total_servicos(servs, services_map)
 
-    def total_from_text(texto_servico: str) -> float:
-        servs = texto_para_lista_servicos(texto_servico)
-        return calcular_total_servicos(servs, services_map)
+        df_admin["Preço do serviço"] = df_admin["Serviço(s)"].apply(total_from_text).astype(float)
 
-    df_admin["Preço do serviço"] = df_admin["Serviço(s)"].apply(total_from_text).astype(float)
+        colp1, colp2, colp3 = st.columns([1, 1, 1])
+        with colp1:
+            periodo = st.selectbox("Período", ["Tudo", "Mês", "Ano"], index=0)
 
-    colp1, colp2, colp3 = st.columns([1, 1, 1])
-    with colp1:
-        periodo = st.selectbox("Período", ["Tudo", "Mês", "Ano"], index=0)
+        anos_disponiveis = sorted([int(y) for y in df_admin["Data_dt"].dropna().dt.year.unique().tolist()])
+        ano_padrao = anos_disponiveis[-1] if anos_disponiveis else date.today().year
 
-    anos_disponiveis = sorted([int(y) for y in df_admin["Data_dt"].dropna().dt.year.unique().tolist()])
-    ano_padrao = anos_disponiveis[-1] if anos_disponiveis else date.today().year
+        with colp2:
+            ano_sel = st.selectbox(
+                "Ano",
+                anos_disponiveis if anos_disponiveis else [ano_padrao],
+                index=(len(anos_disponiveis) - 1) if anos_disponiveis else 0,
+            )
 
-    with colp2:
-        ano_sel = st.selectbox(
-            "Ano",
-            anos_disponiveis if anos_disponiveis else [ano_padrao],
-            index=(len(anos_disponiveis) - 1) if anos_disponiveis else 0,
+        with colp3:
+            mes_sel = st.selectbox("Mês", list(range(1, 13)), index=date.today().month - 1)
+
+        df_filtrado = df_admin.copy()
+        if periodo == "Mês":
+            df_filtrado = df_filtrado[
+                (df_filtrado["Data_dt"].dt.year == int(ano_sel))
+                & (df_filtrado["Data_dt"].dt.month == int(mes_sel))
+            ]
+        elif periodo == "Ano":
+            df_filtrado = df_filtrado[df_filtrado["Data_dt"].dt.year == int(ano_sel)]
+
+        filtrar_status = st.checkbox("Filtrar por status")
+        if filtrar_status:
+            status_sel = st.selectbox("Status", ["pendente", "pago", "finalizado"])
+            df_filtrado = df_filtrado[df_filtrado["Status"].str.lower() == status_sel]
+
+        total_servicos = float(df_filtrado["Preço do serviço"].sum()) if not df_filtrado.empty else 0.0
+        total_sinais = float(df_filtrado["Sinal"].sum()) if not df_filtrado.empty else 0.0
+        qtd = int(len(df_filtrado))
+
+        m1, m2, m3 = st.columns(3)
+        m1.metric("Quantidade", f"{qtd}")
+        m2.metric("Total serviços", fmt_brl(total_servicos))
+        m3.metric("Total sinais", fmt_brl(total_sinais))
+
+        df_show = df_filtrado.drop(columns=["Data_dt"]).copy()
+        df_show["Preço do serviço"] = df_show["Preço do serviço"].apply(lambda v: fmt_brl(float(v)))
+        df_show["Sinal"] = df_show["Sinal"].apply(lambda v: fmt_brl(float(v)))
+        st.dataframe(
+            df_show.drop(columns=["id"]),
+            use_container_width=True,
+            height=360
         )
 
-    with colp3:
-        mes_sel = st.selectbox("Mês", list(range(1, 13)), index=date.today().month - 1)
+        st.divider()
+        st.subheader("⚡ Ações rápidas")
 
-    df_filtrado = df_admin.copy()
-    if periodo == "Mês":
-        df_filtrado = df_filtrado[
-            (df_filtrado["Data_dt"].dt.year == int(ano_sel))
-            & (df_filtrado["Data_dt"].dt.month == int(mes_sel))
-        ]
-    elif periodo == "Ano":
-        df_filtrado = df_filtrado[df_filtrado["Data_dt"].dt.year == int(ano_sel)]
+        st.subheader("✅ Marcar como PAGO")
 
-    filtrar_status = st.checkbox("Filtrar por status")
-    if filtrar_status:
-        status_sel = st.selectbox("Status", ["pendente", "pago", "finalizado"])
-        df_filtrado = df_filtrado[df_filtrado["Status"].str.lower() == status_sel]
+        ag_pagar = st.selectbox(
+            "Selecione o agendamento",
+            df_admin["id"],
+            format_func=lambda x: (
+                f"{df_admin[df_admin.id == x]['Cliente'].values[0]} • "
+                f"{df_admin[df_admin.id == x]['Data'].values[0]} "
+                f"{df_admin[df_admin.id == x]['Horário'].values[0]}"
+            ),
+            key="pagar_select",
+        )
 
-    total_servicos = float(df_filtrado["Preço do serviço"].sum()) if not df_filtrado.empty else 0.0
-    total_sinais = float(df_filtrado["Sinal"].sum()) if not df_filtrado.empty else 0.0
-    qtd = int(len(df_filtrado))
+        if st.button("Marcar como PAGO", type="primary"):
+            marcar_como_pago_admin(access_token, tenant_id, int(ag_pagar))
+            st.success("Agendamento marcado como PAGO.")
+            st.rerun()
 
-    m1, m2, m3 = st.columns(3)
-    m1.metric("Quantidade", f"{qtd}")
-    m2.metric("Total serviços", fmt_brl(total_servicos))
-    m3.metric("Total sinais", fmt_brl(total_sinais))
+        st.subheader("🗑️ Excluir agendamento")
 
-    df_show = df_filtrado.drop(columns=["Data_dt"]).copy()
-    df_show["Preço do serviço"] = df_show["Preço do serviço"].apply(lambda v: fmt_brl(float(v)))
-    df_show["Sinal"] = df_show["Sinal"].apply(lambda v: fmt_brl(float(v)))
-    st.dataframe(
-        df_show.drop(columns=["id"]),
-        use_container_width=True,
-        height=360
-    )
+        ag_excluir = st.selectbox(
+            "Selecione para excluir",
+            df_admin["id"],
+            format_func=lambda x: (
+                f"{df_admin[df_admin.id == x]['Cliente'].values[0]} • "
+                f"{df_admin[df_admin.id == x]['Data'].values[0]} "
+                f"{df_admin[df_admin.id == x]['Horário'].values[0]}"
+            ),
+            key="excluir_select_unique",
+        )
 
-    st.divider()
-    st.subheader("⚡ Ações rápidas")
-
-    st.subheader("✅ Marcar como PAGO")
-
-    ag_pagar = st.selectbox(
-        "Selecione o agendamento",
-        df_admin["id"],
-        format_func=lambda x: (
-            f"{df_admin[df_admin.id == x]['Cliente'].values[0]} • "
-            f"{df_admin[df_admin.id == x]['Data'].values[0]} "
-            f"{df_admin[df_admin.id == x]['Horário'].values[0]}"
-        ),
-        key="pagar_select",
-    )
-
-    if st.button("Marcar como PAGO", type="primary"):
-        marcar_como_pago_admin(access_token, tenant_id, int(ag_pagar))
-        st.success("Agendamento marcado como PAGO.")
-        st.rerun()
-
-    st.subheader("🗑️ Excluir agendamento")
-
-    ag_excluir = st.selectbox(
-        "Selecione para excluir",
-        df_admin["id"],
-        format_func=lambda x: (
-            f"{df_admin[df_admin.id == x]['Cliente'].values[0]} • "
-            f"{df_admin[df_admin.id == x]['Data'].values[0]} "
-            f"{df_admin[df_admin.id == x]['Horário'].values[0]}"
-        ),
-        key="excluir_select_unique",
-    )
-
-    if st.button("Excluir agendamento", use_container_width=True):
-        excluir_agendamento_admin(access_token, tenant_id, int(ag_excluir))
-        st.success("Agendamento excluído.")
-        st.rerun()
+        if st.button("Excluir agendamento", use_container_width=True):
+            excluir_agendamento_admin(access_token, tenant_id, int(ag_excluir))
+            st.success("Agendamento excluído.")
+            st.rerun()
 
     st.divider()
     if st.button("🚀 Assinar plano", type="primary", use_container_width=True):
@@ -1646,14 +1657,13 @@ def tela_admin():
         except Exception as e:
             st.error("Falha ao iniciar assinatura.")
             st.code(str(e))
-            
-    st.markdown('</div>', unsafe_allow_html=True)  # fecha page-content
-    st.markdown('<div class="page-footer">', unsafe_allow_html=True)
 
-    if st.button("🚪 Sair", use_container_width=True):
-        auth_logout()
-
-    st.markdown('</div></div>', unsafe_allow_html=True)
+    # ===== Rodapé fixo "Sair" (sempre no final da tela) =====
+    st.markdown("""
+    <div class="footer-logout">
+      <a href="?logout=1">🚪 Sair</a>
+    </div>
+    """, unsafe_allow_html=True)
 
 # ============================================================
 # ROUTER
