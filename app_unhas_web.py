@@ -1638,9 +1638,45 @@ def tela_admin():
     dias = dias_restantes(paid_until)
 
     if dias > 7:
-        st.success(f"✅ Plano ativo • {dias} dias restantes • Acesso liberado ✅")
+        st.markdown(
+            f"""
+            <div style="
+                display:flex;
+                gap:10px;
+                flex-wrap:wrap;
+                background:rgba(34,197,94,.12);
+                border:1px solid rgba(34,197,94,.35);
+                padding:14px;
+                border-radius:14px;
+                margin-bottom:14px;
+            ">
+                <span class="chip">✅ <b>Plano ativo</b></span>
+                <span class="chip">⏳ <b>{dias} dias restantes</b></span>
+                <span class="chip">🔓 <b>Acesso liberado</b></span>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
     elif dias > 0:
-        st.warning(f"⚠️ Atenção: restam apenas {dias} dias de uso • Acesso liberado ✅")
+        st.markdown(
+            f"""
+            <div style="
+                display:flex;
+                gap:10px;
+                flex-wrap:wrap;
+                background:rgba(245,158,11,.12);
+                border:1px solid rgba(245,158,11,.35);
+                padding:14px;
+                border-radius:14px;
+                margin-bottom:14px;
+            ">
+                <span class="chip">⚠️ <b>Atenção</b></span>
+                <span class="chip">⏳ <b>{dias} dias restantes</b></span>
+                <span class="chip">🔓 <b>Acesso liberado</b></span>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
     else:
         st.error("⛔ Seu plano expirou. Renove para continuar usando.")
         st.stop()
