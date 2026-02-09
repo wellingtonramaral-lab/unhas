@@ -234,7 +234,7 @@ PUBLIC_APP_BASE_URL = st.secrets.get("PUBLIC_APP_BASE_URL", "").strip()
 SAAS_PIX_CHAVE = st.secrets.get("SAAS_PIX_CHAVE", "").strip()
 SAAS_PIX_NOME = st.secrets.get("SAAS_PIX_NOME", "Suporte").strip()
 SAAS_PIX_CIDADE = st.secrets.get("SAAS_PIX_CIDADE", "BRASIL").strip()
-SAAS_MENSAL_VALOR = st.secrets.get("SAAS_MENSAL_VALOR", "R$ 19,99").strip()
+SAAS_MENSAL_VALOR = st.secrets.get("SAAS_MENSAL_VALOR", "R$ 1,99").strip()
 SAAS_SUPORTE_WHATSAPP = st.secrets.get("SAAS_SUPORTE_WHATSAPP", "").strip()
 
 # Bucket do catálogo (Supabase Storage)
@@ -1709,7 +1709,7 @@ def tela_admin():
 
                 if resp.status_code != 200 or not data.get("ok") or not data.get("payment_url"):
                     st.error("Erro ao gerar pagamento.")
-                    st.code(data)
+                    st.json(data)
                     st.session_state.payment_url = None
                 else:
                     st.success("Pagamento gerado ✅")
