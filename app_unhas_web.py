@@ -464,6 +464,8 @@ if "show_catalog" not in st.session_state:
     st.session_state.show_catalog = False
 if "show_deposit" not in st.session_state:
     st.session_state.show_deposit = False
+if "payment_url" not in st.session_state:
+    st.session_state.payment_url = None
 
 # ============================================================
 # AUTH (ADMIN)
@@ -1678,42 +1680,57 @@ def tela_admin():
             unsafe_allow_html=True,
         )
     else:
-        st.markdown(
-            f"""
-            <div style="
-                background:rgba(239,68,68,.12);
-                border:1px solid rgba(239,68,68,.45);
-                padding:18px;
-                border-radius:16px;
-                margin-top:14px;
-            ">
-                <b>⛔ Seu plano expirou</b><br>
-                Para continuar usando o Agenda-Pro, renove seu plano mensal
-                (<b>{SAAS_MENSAL_VALOR}</b>).
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
+        st.error("⛔ Seu plano expirou. Renove para continuar usando.")
+        st.caption(f"Valor do plano: **{SAAS_MENSAL_VALOR}**")
 
         st.divider()
 
-        c1, c2 = st.columns(2)
+        tenant_id = str(tenant.get("id"))
 
-        with c1:
-            st.link_button(
-                "💳 Renovar plano agora",
-                URL_ASSINAR_PLANO,
-                use_container_width=True,
-                type="primary",
-            )
+        # ✅ Primeiro: gerar pagamento (POST)
+        if st.button("🚀 Gerar link de renovação", type="primary", use_container_width=True):
+            try:
+                if not URL_ASSINAR_PLANO:
+                    st.error("Falta configurar URL_ASSINAR_PLANO no secrets.")
+                    st.stop()
 
-        with c2:
-            if SAAS_SUPORTE_WHATSAPP:
-                st.link_button(
-                    "💬 Falar com suporte",
-                    f"https://wa.me/{SAAS_SUPORTE_WHATSAPP}",
-                    use_container_width=True,
+                resp = requests.post(
+                    URL_ASSINAR_PLANO,
+                    headers=fn_headers(),
+                    json={
+                        "tenant_id": str(tenant_id),
+                        "customer_email": str(user.email or ""),
+                        "customer_name": str((tenant.get("nome") or "Profissional")),
+                    },
+                    timeout=20,
                 )
+
+                data = resp.json() if resp.text else {}
+
+                if resp.status_code != 200 or not data.get("ok") or not data.get("payment_url"):
+                    st.error("Erro ao gerar pagamento.")
+                    st.code(data)
+                    st.session_state.payment_url = None
+                else:
+                    st.success("Pagamento gerado ✅")
+                    st.session_state.payment_url = data["payment_url"]
+
+            except Exception as e:
+                st.error("Falha ao iniciar renovação.")
+                st.code(str(e))
+                st.session_state.payment_url = None
+
+        # ✅ Segundo: mostrar botão "Ir para pagamento" (GET no payment_url, que é permitido)
+        if st.session_state.payment_url:
+            st.link_button("👉 Ir para pagamento", st.session_state.payment_url, use_container_width=True)
+
+        # opcional: suporte
+        if SAAS_SUPORTE_WHATSAPP:
+            st.link_button(
+                "💬 Falar com suporte",
+                f"https://wa.me/{SAAS_SUPORTE_WHATSAPP}",
+                use_container_width=True,
+            )
 
         st.stop()
 
