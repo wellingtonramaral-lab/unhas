@@ -1678,7 +1678,43 @@ def tela_admin():
             unsafe_allow_html=True,
         )
     else:
-        st.error("⛔ Seu plano expirou. Renove para continuar usando.")
+        st.markdown(
+            f"""
+            <div style="
+                background:rgba(239,68,68,.12);
+                border:1px solid rgba(239,68,68,.45);
+                padding:18px;
+                border-radius:16px;
+                margin-top:14px;
+            ">
+                <b>⛔ Seu plano expirou</b><br>
+                Para continuar usando o Agenda-Pro, renove seu plano mensal
+                (<b>{SAAS_MENSAL_VALOR}</b>).
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        st.divider()
+
+        c1, c2 = st.columns(2)
+
+        with c1:
+            st.link_button(
+                "💳 Renovar plano agora",
+                URL_ASSINAR_PLANO,
+                use_container_width=True,
+                type="primary",
+            )
+
+        with c2:
+            if SAAS_SUPORTE_WHATSAPP:
+                st.link_button(
+                    "💬 Falar com suporte",
+                    f"https://wa.me/{SAAS_SUPORTE_WHATSAPP}",
+                    use_container_width=True,
+                )
+
         st.stop()
 
     tenant_id = str(tenant.get("id"))
