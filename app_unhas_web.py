@@ -1952,6 +1952,95 @@ def tela_admin():
             st.success(f"🗑️ **Excluído definitivamente**: {resumo_ag(int(ag_excluir))}")
             st.rerun()
 
+        # ====================================================
+        # 👥 EXPORTAR "CADASTRO" CONSOLIDADO DE CLIENTES
+        # ====================================================
+        st.subheader("👥 Cadastro consolidado (por cliente)")
+        st.caption("Resumo por cliente: visitas, última data, total gasto e sinais.")
+
+        base = df_admin.copy()
+
+        # Garante colunas essenciais
+        if "Cliente" not in base.columns or "Data" not in base.columns:
+            st.info("Sem dados suficientes para consolidar clientes.")
+        else:
+            # Garantir Data em datetime para achar última visita
+            base["Data_dt"] = pd.to_datetime(base["Data"], errors="coerce")
+
+            # Se você já tiver "Preço do serviço" calculado mais abaixo, beleza.
+            # Se não tiver aqui, cria como 0 para não quebrar.
+            if "Preço do serviço" not in base.columns:
+                base["Preço do serviço"] = 0.0
+
+            if "Sinal" not in base.columns:
+                base["Sinal"] = 0.0
+
+            # Serviços: extrair do texto "Serviço(s)" se existir
+            if "Serviço(s)" not in base.columns:
+                base["Serviço(s)"] = ""
+
+            def top_servicos(textos, n=3):
+                # pega frequências dos serviços separados por "+"
+                freq = {}
+                for t in textos:
+                    t = str(t or "")
+                    parts = [p.strip() for p in t.split("+") if p.strip()]
+                    for p in parts:
+                        freq[p] = freq.get(p, 0) + 1
+                top = sorted(freq.items(), key=lambda x: x[1], reverse=True)[:n]
+                return ", ".join([f"{k} ({v})" for k, v in top]) if top else ""
+
+            # última linha por cliente (para status/serviço mais recente)
+            base_sorted = base.sort_values(["Cliente", "Data_dt", "Horário"], ascending=[True, True, True])
+            last_rows = base_sorted.groupby("Cliente", as_index=False).tail(1).set_index("Cliente")
+
+            resumo = (
+                base.groupby("Cliente", as_index=False)
+                .agg(
+                    visitas=("Cliente", "count"),
+                    ultima_visita=("Data_dt", "max"),
+                    total_gasto=("Preço do serviço", "sum"),
+                    total_sinais=("Sinal", "sum"),
+                    servicos_top=("Serviço(s)", lambda s: top_servicos(list(s), n=3)),
+                )
+            )
+
+            # status da última (se existir)
+            if "Status" in base.columns:
+                resumo["status_ultima"] = resumo["Cliente"].map(lambda c: last_rows.loc[c, "Status"] if c in last_rows.index else "")
+
+            # formata data
+            resumo["ultima_visita"] = resumo["ultima_visita"].dt.strftime("%Y-%m-%d")
+
+            # downloads
+            csv_clientes = resumo.to_csv(index=False).encode("utf-8")
+
+            c1, c2 = st.columns(2)
+            with c1:
+                st.download_button(
+                    "⬇️ Baixar CSV (clientes)",
+                    data=csv_clientes,
+                    file_name="agenda_pro_cadastro_clientes.csv",
+                    mime="text/csv",
+                    use_container_width=True,
+                )
+
+            with c2:
+                try:
+                    buffer = io.BytesIO()
+                    with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+                        resumo.to_excel(writer, index=False, sheet_name="Clientes")
+                    st.download_button(
+                        "⬇️ Baixar Excel (clientes)",
+                        data=buffer.getvalue(),
+                        file_name="agenda_pro_cadastro_clientes.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        use_container_width=True,
+                    )
+                except Exception as e:
+                    st.warning("Não consegui gerar Excel neste ambiente.")
+                    st.code(str(e))
+
     st.divider()
     if st.button("🚀 Assinar plano", type="primary", use_container_width=True):
         try:
