@@ -1638,9 +1638,9 @@ def tela_admin():
     dias = dias_restantes(paid_until)
 
     if dias > 7:
-        st.success(f"✅ Plano ativo • {dias} dias restantes")
+        st.success(f"✅ Plano ativo • {dias} dias restantes • Acesso liberado ✅")
     elif dias > 0:
-        st.warning(f"⚠️ Atenção: restam apenas {dias} dias de uso")
+        st.warning(f"⚠️ Atenção: restam apenas {dias} dias de uso • Acesso liberado ✅")
     else:
         st.error("⛔ Seu plano expirou. Renove para continuar usando.")
         st.stop()
@@ -1660,8 +1660,6 @@ def tela_admin():
         if paid_until:
             st.caption(f"Venceu em **{paid_until.strftime('%d/%m/%Y')}**.")
         st.stop()
-
-    st.success("Acesso liberado ✅")
 
     atualizar_finalizados_admin(access_token, tenant_id)
 
