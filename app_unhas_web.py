@@ -367,8 +367,18 @@ def calcular_total_servicos(servicos, services_map):
         total += float(services_map.get(s, 0.0))
     return float(total)
 
-def calcular_sinal(_servicos):
-    return float(VALOR_SINAL_FIXO)
+def calcular_sinal(_servicos, deposit_cfg: dict | None = None):
+    """
+    Se deposit_cfg["enabled"] == False => sinal = 0
+    Caso contrário usa deposit_cfg["value"] ou VALOR_SINAL_FIXO.
+    """
+    deposit_cfg = deposit_cfg or {"enabled": True, "value": float(VALOR_SINAL_FIXO)}
+    if not bool(deposit_cfg.get("enabled", True)):
+        return 0.0
+    try:
+        return float(deposit_cfg.get("value", VALOR_SINAL_FIXO))
+    except Exception:
+        return float(VALOR_SINAL_FIXO)
 
 def validar_hhmm(h: str) -> bool:
     try:
@@ -452,6 +462,8 @@ if "show_services" not in st.session_state:
     st.session_state.show_services = False
 if "show_catalog" not in st.session_state:
     st.session_state.show_catalog = False
+if "show_deposit" not in st.session_state:
+    st.session_state.show_deposit = False
 
 # ============================================================
 # AUTH (ADMIN)
@@ -590,6 +602,29 @@ def settings_get_catalog(settings: dict):
 
 def settings_set_catalog(settings: dict, enabled: bool, items: list):
     settings["catalog"] = {"enabled": bool(enabled), "items": items}
+    return settings
+
+def settings_get_deposit(settings: dict):
+    d = settings.get("deposit")
+    if isinstance(d, dict):
+        enabled = bool(d.get("enabled", True))
+        try:
+            value = float(d.get("value", VALOR_SINAL_FIXO))
+        except Exception:
+            value = float(VALOR_SINAL_FIXO)
+        if value < 0:
+            value = 0.0
+        return {"enabled": enabled, "value": value}
+    return {"enabled": True, "value": float(VALOR_SINAL_FIXO)}
+
+def settings_set_deposit(settings: dict, enabled: bool, value: float):
+    try:
+        v = float(value)
+    except Exception:
+        v = 0.0
+    if v < 0:
+        v = 0.0
+    settings["deposit"] = {"enabled": bool(enabled), "value": v}
     return settings
 
 # ============================================================
@@ -949,7 +984,11 @@ def montar_mensagem_pagamento_cliente(
     pix_nome: str,
     pix_cidade: str,
     services_map: dict,
+    deposit_cfg: dict | None = None,
 ):
+    deposit_cfg = deposit_cfg or {"enabled": True, "value": float(valor_sinal)}
+    deposit_on = bool(deposit_cfg.get("enabled", True)) and float(valor_sinal or 0) > 0
+
     servs = normalizar_servicos(servicos)
     total = calcular_total_servicos(servs, services_map)
     lista = "\n".join([f"• {s} ({fmt_brl(services_map.get(s, 0.0))})" for s in servs]) if servs else "-"
@@ -961,13 +1000,18 @@ def montar_mensagem_pagamento_cliente(
         "🧾 Serviço(s):\n"
         f"{lista}\n\n"
         f"💰 Total: {fmt_brl(total)}\n"
-        f"✅ Sinal: {fmt_brl(valor_sinal)}\n\n"
-        "Pix para pagamento do sinal:\n"
-        f"🔑 Chave Pix: {pix_chave}\n"
-        f"👤 Nome: {pix_nome}\n"
-        f"🏙️ Cidade: {pix_cidade}\n\n"
-        "📌 Após pagar, envie o comprovante aqui para eu confirmar como PAGO. 🙏"
     )
+    if deposit_on:
+        msg += (
+            f"✅ Sinal: {fmt_brl(valor_sinal)}\n\n"
+            "Pix para pagamento do sinal:\n"
+            f"🔑 Chave Pix: {pix_chave}\n"
+            f"👤 Nome: {pix_nome}\n"
+            f"🏙️ Cidade: {pix_cidade}\n\n"
+            "📌 Após pagar, envie o comprovante aqui para eu confirmar como PAGO. 🙏"
+        )
+    else:
+        msg += "\n📌 Me confirme por aqui que eu valido o agendamento. 🙏"
     return msg
 
 # ============================================================
@@ -1007,6 +1051,7 @@ def menu_topo_comandos(access_token: str, tenant_id: str):
             st.session_state.show_hours = False
             st.session_state.show_services = False
             st.session_state.show_catalog = False
+            st.session_state.show_deposit = False
 
         if st.button("🔗 Copiar link do cliente", use_container_width=True):
             st.session_state.show_copy = True
@@ -1014,6 +1059,7 @@ def menu_topo_comandos(access_token: str, tenant_id: str):
             st.session_state.show_hours = False
             st.session_state.show_services = False
             st.session_state.show_catalog = False
+            st.session_state.show_deposit = False
 
         if st.button("⏰ Horário de trabalho", use_container_width=True):
             st.session_state.show_hours = True
@@ -1021,12 +1067,22 @@ def menu_topo_comandos(access_token: str, tenant_id: str):
             st.session_state.show_copy = False
             st.session_state.show_services = False
             st.session_state.show_catalog = False
+            st.session_state.show_deposit = False
 
         if st.button("🧾 Serviços e valores", use_container_width=True):
             st.session_state.show_services = True
             st.session_state.show_profile = False
             st.session_state.show_copy = False
             st.session_state.show_hours = False
+            st.session_state.show_catalog = False
+            st.session_state.show_deposit = False
+
+        if st.button("💰 Sinal (opcional)", use_container_width=True):
+            st.session_state.show_deposit = True
+            st.session_state.show_profile = False
+            st.session_state.show_copy = False
+            st.session_state.show_hours = False
+            st.session_state.show_services = False
             st.session_state.show_catalog = False
 
         if st.button("📒 Catálogo (fotos/PDF)", use_container_width=True):
@@ -1035,6 +1091,7 @@ def menu_topo_comandos(access_token: str, tenant_id: str):
             st.session_state.show_copy = False
             st.session_state.show_hours = False
             st.session_state.show_services = False
+            st.session_state.show_deposit = False
 
     if st.session_state.show_copy:
         with st.container(border=True):
@@ -1307,6 +1364,36 @@ def menu_topo_comandos(access_token: str, tenant_id: str):
                         st.session_state.show_catalog = False
                         st.rerun()
 
+    # ==========================
+    # SINAL (opcional) - ADMIN
+    # ==========================
+    deposit_cfg = settings_get_deposit(settings)
+
+    if st.session_state.show_deposit:
+        with st.container(border=True):
+            st.markdown("### 💰 Sinal (opcional)")
+            st.caption("Se desativar, a agenda funciona normalmente sem cobrança/PIX.")
+
+            enabled = st.checkbox("Cobrar sinal para reservar", value=deposit_cfg["enabled"])
+            value = st.number_input("Valor do sinal (R$)", min_value=0.0, step=1.0, value=float(deposit_cfg["value"]))
+
+            c1, c2 = st.columns(2)
+            with c1:
+                if st.button("💾 Salvar sinal", use_container_width=True, type="primary"):
+                    settings_set_deposit(settings, enabled=enabled, value=value)
+                    ok, msg = save_tenant_settings_admin(access_token, tenant_id, settings)
+                    if ok:
+                        st.success("Configuração de sinal salva!")
+                        st.session_state.show_deposit = False
+                        st.rerun()
+                    else:
+                        st.error("Não consegui salvar.")
+                        st.code(msg)
+            with c2:
+                if st.button("Fechar", use_container_width=True):
+                    st.session_state.show_deposit = False
+                    st.rerun()
+
 # ============================================================
 # UI: MODO PÚBLICO (CLIENTE)
 # ============================================================
@@ -1342,6 +1429,7 @@ def tela_publica():
     services_map = settings_get_services(settings)
     working_hours = settings_get_working_hours(settings)
     catalog = settings_get_catalog(settings)
+    deposit_cfg = settings_get_deposit(settings)
 
     aba_agendar, aba_catalogo = st.tabs(["📅 Agendamento", "📒 Catálogo"])
 
@@ -1359,12 +1447,16 @@ def tela_publica():
         servicos_escolhidos = normalizar_servicos(servicos_escolhidos)
 
         total_servico = calcular_total_servicos(servicos_escolhidos, services_map)
-        valor_sinal = calcular_sinal(servicos_escolhidos)
+        valor_sinal = calcular_sinal(servicos_escolhidos, deposit_cfg)
 
         if servicos_escolhidos:
-            st.caption(f"Total: **{fmt_brl(total_servico)}** • Sinal: **{fmt_brl(valor_sinal)}**")
+            if deposit_cfg["enabled"] and valor_sinal > 0:
+                st.caption(f"Total: **{fmt_brl(total_servico)}** • Sinal: **{fmt_brl(valor_sinal)}**")
+            else:
+                st.caption(f"Total: **{fmt_brl(total_servico)}**")
         else:
-            st.caption(f"Sinal: **{fmt_brl(valor_sinal)}**")
+            if deposit_cfg["enabled"] and valor_sinal > 0:
+                st.caption(f"Sinal: **{fmt_brl(valor_sinal)}**")
 
         horarios = horarios_do_dia_com_settings(data_atendimento, working_hours)
         if not horarios:
@@ -1438,6 +1530,7 @@ def tela_publica():
                                 pix_nome=pix_nome,
                                 pix_cidade=pix_cidade,
                                 services_map=services_map,
+                                deposit_cfg=deposit_cfg,
                             )
                             st.session_state.wa_link = montar_link_whatsapp(whatsapp_num, mensagem)
                             st.session_state.ultima_chave_reserva = chave
@@ -1631,6 +1724,8 @@ def tela_admin():
         # settings para calcular preços
         settings = get_tenant_settings_admin(access_token, tenant_id)
         services_map = settings_get_services(settings)
+        deposit_cfg = settings_get_deposit(settings)
+        deposit_on = bool(deposit_cfg.get("enabled", True)) and float(deposit_cfg.get("value", 0)) > 0
 
         def total_from_text(texto_servico: str) -> float:
             servs = texto_para_lista_servicos(texto_servico)
@@ -1709,9 +1804,12 @@ def tela_admin():
         m3.metric("A receber", fmt_brl(a_receber))
         m4.metric("Cancelados", f"{cancelados_qtd}")
 
-        ex1, ex2 = st.columns(2)
-        ex1.metric("Total serviços (gerado)", fmt_brl(total_gerado))
-        ex2.metric("Total sinais", fmt_brl(total_sinais))
+        if deposit_on:
+            ex1, ex2 = st.columns(2)
+            ex1.metric("Total serviços (gerado)", fmt_brl(total_gerado))
+            ex2.metric("Total sinais", fmt_brl(total_sinais))
+        else:
+            st.metric("Total serviços (gerado)", fmt_brl(total_gerado))
 
         # --------- tabela (mais legível) ---------
         df_show = df_filtrado.sort_values(["Data_dt", "Horário", "status_ord"], ascending=[True, True, True]).copy()
@@ -1723,9 +1821,13 @@ def tela_admin():
         if "Criado em" in df_show.columns:
             df_show = df_show.drop(columns=["Criado em"], errors="ignore")
 
+        if not deposit_on and "Sinal" in df_show.columns:
+            df_show = df_show.drop(columns=["Sinal"], errors="ignore")
+
         # formatação BRL
         df_show["Preço do serviço"] = df_show["Preço do serviço"].apply(lambda v: fmt_brl(float(v)))
-        df_show["Sinal"] = df_show["Sinal"].apply(lambda v: fmt_brl(float(v)))
+        if "Sinal" in df_show.columns:
+            df_show["Sinal"] = df_show["Sinal"].apply(lambda v: fmt_brl(float(v)))
 
         st.dataframe(
             df_show.drop(columns=["id"], errors="ignore"),
