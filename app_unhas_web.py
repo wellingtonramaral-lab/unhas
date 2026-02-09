@@ -367,18 +367,8 @@ def calcular_total_servicos(servicos, services_map):
         total += float(services_map.get(s, 0.0))
     return float(total)
 
-def calcular_sinal(_servicos, deposit_cfg: dict | None = None):
-    """
-    Se deposit_cfg["enabled"] == False => sinal = 0
-    Caso contrário usa deposit_cfg["value"] ou VALOR_SINAL_FIXO.
-    """
-    deposit_cfg = deposit_cfg or {"enabled": True, "value": float(VALOR_SINAL_FIXO)}
-    if not bool(deposit_cfg.get("enabled", True)):
-        return 0.0
-    try:
-        return float(deposit_cfg.get("value", VALOR_SINAL_FIXO))
-    except Exception:
-        return float(VALOR_SINAL_FIXO)
+def calcular_sinal(_servicos):
+    return float(VALOR_SINAL_FIXO)
 
 def validar_hhmm(h: str) -> bool:
     try:
@@ -462,8 +452,6 @@ if "show_services" not in st.session_state:
     st.session_state.show_services = False
 if "show_catalog" not in st.session_state:
     st.session_state.show_catalog = False
-if "show_deposit" not in st.session_state:
-    st.session_state.show_deposit = False
 
 # ============================================================
 # AUTH (ADMIN)
@@ -602,29 +590,6 @@ def settings_get_catalog(settings: dict):
 
 def settings_set_catalog(settings: dict, enabled: bool, items: list):
     settings["catalog"] = {"enabled": bool(enabled), "items": items}
-    return settings
-
-def settings_get_deposit(settings: dict):
-    d = settings.get("deposit")
-    if isinstance(d, dict):
-        enabled = bool(d.get("enabled", True))
-        try:
-            value = float(d.get("value", VALOR_SINAL_FIXO))
-        except Exception:
-            value = float(VALOR_SINAL_FIXO)
-        if value < 0:
-            value = 0.0
-        return {"enabled": enabled, "value": value}
-    return {"enabled": True, "value": float(VALOR_SINAL_FIXO)}
-
-def settings_set_deposit(settings: dict, enabled: bool, value: float):
-    try:
-        v = float(value)
-    except Exception:
-        v = 0.0
-    if v < 0:
-        v = 0.0
-    settings["deposit"] = {"enabled": bool(enabled), "value": v}
     return settings
 
 # ============================================================
@@ -984,11 +949,7 @@ def montar_mensagem_pagamento_cliente(
     pix_nome: str,
     pix_cidade: str,
     services_map: dict,
-    deposit_cfg: dict | None = None,
 ):
-    deposit_cfg = deposit_cfg or {"enabled": True, "value": float(valor_sinal)}
-    deposit_on = bool(deposit_cfg.get("enabled", True)) and float(valor_sinal or 0) > 0
-
     servs = normalizar_servicos(servicos)
     total = calcular_total_servicos(servs, services_map)
     lista = "\n".join([f"• {s} ({fmt_brl(services_map.get(s, 0.0))})" for s in servs]) if servs else "-"
@@ -1000,18 +961,13 @@ def montar_mensagem_pagamento_cliente(
         "🧾 Serviço(s):\n"
         f"{lista}\n\n"
         f"💰 Total: {fmt_brl(total)}\n"
+        f"✅ Sinal: {fmt_brl(valor_sinal)}\n\n"
+        "Pix para pagamento do sinal:\n"
+        f"🔑 Chave Pix: {pix_chave}\n"
+        f"👤 Nome: {pix_nome}\n"
+        f"🏙️ Cidade: {pix_cidade}\n\n"
+        "📌 Após pagar, envie o comprovante aqui para eu confirmar como PAGO. 🙏"
     )
-    if deposit_on:
-        msg += (
-            f"✅ Sinal: {fmt_brl(valor_sinal)}\n\n"
-            "Pix para pagamento do sinal:\n"
-            f"🔑 Chave Pix: {pix_chave}\n"
-            f"👤 Nome: {pix_nome}\n"
-            f"🏙️ Cidade: {pix_cidade}\n\n"
-            "📌 Após pagar, envie o comprovante aqui para eu confirmar como PAGO. 🙏"
-        )
-    else:
-        msg += "\n📌 Me confirme por aqui que eu valido o agendamento. 🙏"
     return msg
 
 # ============================================================
@@ -1051,7 +1007,6 @@ def menu_topo_comandos(access_token: str, tenant_id: str):
             st.session_state.show_hours = False
             st.session_state.show_services = False
             st.session_state.show_catalog = False
-            st.session_state.show_deposit = False
 
         if st.button("🔗 Copiar link do cliente", use_container_width=True):
             st.session_state.show_copy = True
@@ -1059,7 +1014,6 @@ def menu_topo_comandos(access_token: str, tenant_id: str):
             st.session_state.show_hours = False
             st.session_state.show_services = False
             st.session_state.show_catalog = False
-            st.session_state.show_deposit = False
 
         if st.button("⏰ Horário de trabalho", use_container_width=True):
             st.session_state.show_hours = True
@@ -1067,22 +1021,12 @@ def menu_topo_comandos(access_token: str, tenant_id: str):
             st.session_state.show_copy = False
             st.session_state.show_services = False
             st.session_state.show_catalog = False
-            st.session_state.show_deposit = False
 
         if st.button("🧾 Serviços e valores", use_container_width=True):
             st.session_state.show_services = True
             st.session_state.show_profile = False
             st.session_state.show_copy = False
             st.session_state.show_hours = False
-            st.session_state.show_catalog = False
-            st.session_state.show_deposit = False
-
-        if st.button("💰 Sinal (opcional)", use_container_width=True):
-            st.session_state.show_deposit = True
-            st.session_state.show_profile = False
-            st.session_state.show_copy = False
-            st.session_state.show_hours = False
-            st.session_state.show_services = False
             st.session_state.show_catalog = False
 
         if st.button("📒 Catálogo (fotos/PDF)", use_container_width=True):
@@ -1091,7 +1035,6 @@ def menu_topo_comandos(access_token: str, tenant_id: str):
             st.session_state.show_copy = False
             st.session_state.show_hours = False
             st.session_state.show_services = False
-            st.session_state.show_deposit = False
 
     if st.session_state.show_copy:
         with st.container(border=True):
@@ -1364,36 +1307,6 @@ def menu_topo_comandos(access_token: str, tenant_id: str):
                         st.session_state.show_catalog = False
                         st.rerun()
 
-    # ==========================
-    # SINAL (opcional) - ADMIN
-    # ==========================
-    deposit_cfg = settings_get_deposit(settings)
-
-    if st.session_state.show_deposit:
-        with st.container(border=True):
-            st.markdown("### 💰 Sinal (opcional)")
-            st.caption("Se desativar, a agenda funciona normalmente sem cobrança/PIX.")
-
-            enabled = st.checkbox("Cobrar sinal para reservar", value=deposit_cfg["enabled"])
-            value = st.number_input("Valor do sinal (R$)", min_value=0.0, step=1.0, value=float(deposit_cfg["value"]))
-
-            c1, c2 = st.columns(2)
-            with c1:
-                if st.button("💾 Salvar sinal", use_container_width=True, type="primary"):
-                    settings_set_deposit(settings, enabled=enabled, value=value)
-                    ok, msg = save_tenant_settings_admin(access_token, tenant_id, settings)
-                    if ok:
-                        st.success("Configuração de sinal salva!")
-                        st.session_state.show_deposit = False
-                        st.rerun()
-                    else:
-                        st.error("Não consegui salvar.")
-                        st.code(msg)
-            with c2:
-                if st.button("Fechar", use_container_width=True):
-                    st.session_state.show_deposit = False
-                    st.rerun()
-
 # ============================================================
 # UI: MODO PÚBLICO (CLIENTE)
 # ============================================================
@@ -1429,7 +1342,6 @@ def tela_publica():
     services_map = settings_get_services(settings)
     working_hours = settings_get_working_hours(settings)
     catalog = settings_get_catalog(settings)
-    deposit_cfg = settings_get_deposit(settings)
 
     aba_agendar, aba_catalogo = st.tabs(["📅 Agendamento", "📒 Catálogo"])
 
@@ -1447,16 +1359,12 @@ def tela_publica():
         servicos_escolhidos = normalizar_servicos(servicos_escolhidos)
 
         total_servico = calcular_total_servicos(servicos_escolhidos, services_map)
-        valor_sinal = calcular_sinal(servicos_escolhidos, deposit_cfg)
+        valor_sinal = calcular_sinal(servicos_escolhidos)
 
         if servicos_escolhidos:
-            if deposit_cfg["enabled"] and valor_sinal > 0:
-                st.caption(f"Total: **{fmt_brl(total_servico)}** • Sinal: **{fmt_brl(valor_sinal)}**")
-            else:
-                st.caption(f"Total: **{fmt_brl(total_servico)}**")
+            st.caption(f"Total: **{fmt_brl(total_servico)}** • Sinal: **{fmt_brl(valor_sinal)}**")
         else:
-            if deposit_cfg["enabled"] and valor_sinal > 0:
-                st.caption(f"Sinal: **{fmt_brl(valor_sinal)}**")
+            st.caption(f"Sinal: **{fmt_brl(valor_sinal)}**")
 
         horarios = horarios_do_dia_com_settings(data_atendimento, working_hours)
         if not horarios:
@@ -1530,7 +1438,6 @@ def tela_publica():
                                 pix_nome=pix_nome,
                                 pix_cidade=pix_cidade,
                                 services_map=services_map,
-                                deposit_cfg=deposit_cfg,
                             )
                             st.session_state.wa_link = montar_link_whatsapp(whatsapp_num, mensagem)
                             st.session_state.ultima_chave_reserva = chave
@@ -1638,45 +1545,9 @@ def tela_admin():
     dias = dias_restantes(paid_until)
 
     if dias > 7:
-        st.markdown(
-            f"""
-            <div style="
-                display:flex;
-                gap:10px;
-                flex-wrap:wrap;
-                background:rgba(34,197,94,.12);
-                border:1px solid rgba(34,197,94,.35);
-                padding:14px;
-                border-radius:14px;
-                margin-bottom:14px;
-            ">
-                <span class="chip">✅ <b>Plano ativo</b></span>
-                <span class="chip">⏳ <b>{dias} dias restantes</b></span>
-                <span class="chip">🔓 <b>Acesso liberado</b></span>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
+        st.success(f"✅ Plano ativo • {dias} dias restantes")
     elif dias > 0:
-        st.markdown(
-            f"""
-            <div style="
-                display:flex;
-                gap:10px;
-                flex-wrap:wrap;
-                background:rgba(245,158,11,.12);
-                border:1px solid rgba(245,158,11,.35);
-                padding:14px;
-                border-radius:14px;
-                margin-bottom:14px;
-            ">
-                <span class="chip">⚠️ <b>Atenção</b></span>
-                <span class="chip">⏳ <b>{dias} dias restantes</b></span>
-                <span class="chip">🔓 <b>Acesso liberado</b></span>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
+        st.warning(f"⚠️ Atenção: restam apenas {dias} dias de uso")
     else:
         st.error("⛔ Seu plano expirou. Renove para continuar usando.")
         st.stop()
@@ -1696,6 +1567,8 @@ def tela_admin():
         if paid_until:
             st.caption(f"Venceu em **{paid_until.strftime('%d/%m/%Y')}**.")
         st.stop()
+
+    st.success("Acesso liberado ✅")
 
     atualizar_finalizados_admin(access_token, tenant_id)
 
@@ -1758,8 +1631,6 @@ def tela_admin():
         # settings para calcular preços
         settings = get_tenant_settings_admin(access_token, tenant_id)
         services_map = settings_get_services(settings)
-        deposit_cfg = settings_get_deposit(settings)
-        deposit_on = bool(deposit_cfg.get("enabled", True)) and float(deposit_cfg.get("value", 0)) > 0
 
         def total_from_text(texto_servico: str) -> float:
             servs = texto_para_lista_servicos(texto_servico)
@@ -1838,12 +1709,9 @@ def tela_admin():
         m3.metric("A receber", fmt_brl(a_receber))
         m4.metric("Cancelados", f"{cancelados_qtd}")
 
-        if deposit_on:
-            ex1, ex2 = st.columns(2)
-            ex1.metric("Total serviços (gerado)", fmt_brl(total_gerado))
-            ex2.metric("Total sinais", fmt_brl(total_sinais))
-        else:
-            st.metric("Total serviços (gerado)", fmt_brl(total_gerado))
+        ex1, ex2 = st.columns(2)
+        ex1.metric("Total serviços (gerado)", fmt_brl(total_gerado))
+        ex2.metric("Total sinais", fmt_brl(total_sinais))
 
         # --------- tabela (mais legível) ---------
         df_show = df_filtrado.sort_values(["Data_dt", "Horário", "status_ord"], ascending=[True, True, True]).copy()
@@ -1855,13 +1723,9 @@ def tela_admin():
         if "Criado em" in df_show.columns:
             df_show = df_show.drop(columns=["Criado em"], errors="ignore")
 
-        if not deposit_on and "Sinal" in df_show.columns:
-            df_show = df_show.drop(columns=["Sinal"], errors="ignore")
-
         # formatação BRL
         df_show["Preço do serviço"] = df_show["Preço do serviço"].apply(lambda v: fmt_brl(float(v)))
-        if "Sinal" in df_show.columns:
-            df_show["Sinal"] = df_show["Sinal"].apply(lambda v: fmt_brl(float(v)))
+        df_show["Sinal"] = df_show["Sinal"].apply(lambda v: fmt_brl(float(v)))
 
         st.dataframe(
             df_show.drop(columns=["id"], errors="ignore"),
@@ -1872,13 +1736,8 @@ def tela_admin():
         # ====================================================
         # AÇÕES RÁPIDAS
         # ====================================================
-        # AÇÕES RÁPIDAS
-        # ====================================================
         st.divider()
         st.subheader("⚡ Ações rápidas")
-
-        # ✅ legenda para evitar confusão (cancelar vs excluir)
-        st.caption("❌ **Cancelar** mantém o registro no histórico • 🗑️ **Excluir** remove definitivamente.")
 
         def fmt_ag(ag_id: int) -> str:
             row = df_admin[df_admin.id == ag_id]
@@ -1888,14 +1747,6 @@ def tela_admin():
             # aqui mantemos o label simples no select (sem o "há X"),
             # pra não ficar mudando enquanto você usa o selectbox
             return f"{r['Cliente']} • {r['Data']} {r['Horário']} • {STATUS_LABELS.get(r['Status_norm'], r['Status_norm'])}"
-
-        def resumo_ag(ag_id: int) -> str:
-            """Resumo fixo para usar em mensagens de sucesso/erro."""
-            row = df_admin[df_admin.id == ag_id]
-            if row.empty:
-                return f"ID {ag_id}"
-            r = row.iloc[0]
-            return f"{r['Cliente']} • {r['Data']} {r['Horário']}"
 
         colA, colB = st.columns(2)
 
@@ -1910,10 +1761,9 @@ def tela_admin():
                 format_func=fmt_ag,
                 key="pagar_select",
             )
-
             if st.button("Marcar como PAGO", type="primary", use_container_width=True):
                 marcar_status_admin(access_token, tenant_id, int(ag_pagar), "pago")
-                st.success(f"✅ Marcado como **PAGO**: {resumo_ag(int(ag_pagar))}")
+                st.success("Agendamento marcado como PAGO.")
                 st.rerun()
 
         with colB:
@@ -1926,10 +1776,9 @@ def tela_admin():
                 format_func=fmt_ag,
                 key="cancel_select",
             )
-
             if st.button("Marcar como CANCELADO", use_container_width=True):
                 marcar_status_admin(access_token, tenant_id, int(ag_cancel), "cancelado")
-                st.success(f"❌ Marcado como **CANCELADO**: {resumo_ag(int(ag_cancel))}")
+                st.success("Agendamento marcado como CANCELADO.")
                 st.rerun()
 
         st.subheader("🗑️ Excluir agendamento")
@@ -1940,106 +1789,10 @@ def tela_admin():
             key="excluir_select_unique",
         )
 
-        # ✅ confirmação obrigatória (protege contra erro irreversível)
-        confirm_delete = st.checkbox(
-            "Confirmo que desejo excluir definitivamente este agendamento",
-            value=False,
-            key="confirm_delete_checkbox",
-        )
-
-        if st.button("Excluir agendamento", use_container_width=True, disabled=not confirm_delete):
+        if st.button("Excluir agendamento", use_container_width=True):
             excluir_agendamento_admin(access_token, tenant_id, int(ag_excluir))
-            st.success(f"🗑️ **Excluído definitivamente**: {resumo_ag(int(ag_excluir))}")
+            st.success("Agendamento excluído.")
             st.rerun()
-
-        # ====================================================
-        # 👥 EXPORTAR "CADASTRO" CONSOLIDADO DE CLIENTES
-        # ====================================================
-        st.subheader("👥 Cadastro consolidado (por cliente)")
-        st.caption("Resumo por cliente: visitas, última data, total gasto e sinais.")
-
-        base = df_admin.copy()
-
-        # Garante colunas essenciais
-        if "Cliente" not in base.columns or "Data" not in base.columns:
-            st.info("Sem dados suficientes para consolidar clientes.")
-        else:
-            # Garantir Data em datetime para achar última visita
-            base["Data_dt"] = pd.to_datetime(base["Data"], errors="coerce")
-
-            # Se você já tiver "Preço do serviço" calculado mais abaixo, beleza.
-            # Se não tiver aqui, cria como 0 para não quebrar.
-            if "Preço do serviço" not in base.columns:
-                base["Preço do serviço"] = 0.0
-
-            if "Sinal" not in base.columns:
-                base["Sinal"] = 0.0
-
-            # Serviços: extrair do texto "Serviço(s)" se existir
-            if "Serviço(s)" not in base.columns:
-                base["Serviço(s)"] = ""
-
-            def top_servicos(textos, n=3):
-                # pega frequências dos serviços separados por "+"
-                freq = {}
-                for t in textos:
-                    t = str(t or "")
-                    parts = [p.strip() for p in t.split("+") if p.strip()]
-                    for p in parts:
-                        freq[p] = freq.get(p, 0) + 1
-                top = sorted(freq.items(), key=lambda x: x[1], reverse=True)[:n]
-                return ", ".join([f"{k} ({v})" for k, v in top]) if top else ""
-
-            # última linha por cliente (para status/serviço mais recente)
-            base_sorted = base.sort_values(["Cliente", "Data_dt", "Horário"], ascending=[True, True, True])
-            last_rows = base_sorted.groupby("Cliente", as_index=False).tail(1).set_index("Cliente")
-
-            resumo = (
-                base.groupby("Cliente", as_index=False)
-                .agg(
-                    visitas=("Cliente", "count"),
-                    ultima_visita=("Data_dt", "max"),
-                    total_gasto=("Preço do serviço", "sum"),
-                    total_sinais=("Sinal", "sum"),
-                    servicos_top=("Serviço(s)", lambda s: top_servicos(list(s), n=3)),
-                )
-            )
-
-            # status da última (se existir)
-            if "Status" in base.columns:
-                resumo["status_ultima"] = resumo["Cliente"].map(lambda c: last_rows.loc[c, "Status"] if c in last_rows.index else "")
-
-            # formata data
-            resumo["ultima_visita"] = resumo["ultima_visita"].dt.strftime("%Y-%m-%d")
-
-            # downloads
-            csv_clientes = resumo.to_csv(index=False).encode("utf-8")
-
-            c1, c2 = st.columns(2)
-            with c1:
-                st.download_button(
-                    "⬇️ Baixar CSV (clientes)",
-                    data=csv_clientes,
-                    file_name="agenda_pro_cadastro_clientes.csv",
-                    mime="text/csv",
-                    use_container_width=True,
-                )
-
-            with c2:
-                try:
-                    buffer = io.BytesIO()
-                    with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
-                        resumo.to_excel(writer, index=False, sheet_name="Clientes")
-                    st.download_button(
-                        "⬇️ Baixar Excel (clientes)",
-                        data=buffer.getvalue(),
-                        file_name="agenda_pro_cadastro_clientes.xlsx",
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        use_container_width=True,
-                    )
-                except Exception as e:
-                    st.warning("Não consegui gerar Excel neste ambiente.")
-                    st.code(str(e))
 
     st.divider()
     if st.button("🚀 Assinar plano", type="primary", use_container_width=True):
