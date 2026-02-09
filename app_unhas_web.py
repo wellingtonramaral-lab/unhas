@@ -1575,12 +1575,60 @@ def tela_admin():
     st.divider()
     st.subheader("📋 Agendamentos / Reservas")
 
+    # ============================================================
+    # ✅ AJUSTE DO DATAFRAME: tempo relativo + status inline
+    # ============================================================
+    def tempo_relativo(dt_value):
+        """
+        Recebe created_at (str ISO ou datetime) e retorna:
+        agora | há X min | há X h | há X dias
+        """
+        if not dt_value:
+            return ""
+
+        dt = dt_value
+        if isinstance(dt, str):
+            dt = parse_dt(dt)
+
+        if not dt:
+            return ""
+
+        # garante timezone
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+
+        # converte pra Brasil
+        dt_local = dt.astimezone(LOCAL_TZ)
+        diff = agora_local() - dt_local
+        secs = int(diff.total_seconds())
+
+        if secs < 0:
+            # se vier algo "no futuro" por timezone/clock, não quebra
+            secs = abs(secs)
+
+        if secs < 60:
+            return "agora"
+        if secs < 3600:
+            return f"há {secs // 60} min"
+        if secs < 86400:
+            return f"há {secs // 3600} h"
+        return f"há {secs // 86400} dias"
+
+    def status_inline_com_tempo(status_norm: str, created_at_value):
+        label = STATUS_LABELS.get(status_norm, status_norm)
+        rel = tempo_relativo(created_at_value)
+        if rel:
+            return f"{label} • {rel}"
+        return f"{label}"
+
     df_admin = listar_agendamentos_admin(access_token, tenant_id)
     if df_admin.empty:
         st.info("Nenhum agendamento encontrado.")
     else:
+        # parse Data_dt
         df_admin["Data_dt"] = pd.to_datetime(df_admin["Data"], errors="coerce")
 
+        # settings para calcular preços
         settings = get_tenant_settings_admin(access_token, tenant_id)
         services_map = settings_get_services(settings)
 
@@ -1590,8 +1638,18 @@ def tela_admin():
 
         df_admin["Preço do serviço"] = df_admin["Serviço(s)"].apply(total_from_text).astype(float)
         df_admin["Status_norm"] = df_admin["Status"].apply(norm_status)
-        df_admin["Status_label"] = df_admin["Status_norm"].apply(lambda s: STATUS_LABELS.get(s, s))
         df_admin["status_ord"] = df_admin["Status_norm"].apply(lambda s: STATUS_SORT.get(s, 99))
+
+        # ✅ NOVO: status com tempo relativo (usa a coluna "Criado em" original)
+        # obs: "Criado em" já vem do rename dentro de listar_agendamentos_admin()
+        if "Criado em" in df_admin.columns:
+            df_admin["Status"] = df_admin.apply(
+                lambda r: status_inline_com_tempo(r["Status_norm"], r["Criado em"]),
+                axis=1
+            )
+        else:
+            # fallback: mantém status label normal
+            df_admin["Status"] = df_admin["Status_norm"].apply(lambda s: STATUS_LABELS.get(s, s))
 
         # --------- filtros ---------
         colp1, colp2, colp3 = st.columns([1, 1, 1])
@@ -1625,7 +1683,6 @@ def tela_admin():
             escolhas = ["Todos"] + [STATUS_LABELS[s] for s in STATUS_ALL]
             sel = st.multiselect("Status", escolhas, default=["Todos"])
             if "Todos" not in sel:
-                # converte labels -> status_norm
                 label_to_norm = {STATUS_LABELS[s]: s for s in STATUS_ALL}
                 wanted = [label_to_norm[x] for x in sel if x in label_to_norm]
                 if wanted:
@@ -1636,8 +1693,14 @@ def tela_admin():
         total_sinais = float(df_filtrado["Sinal"].sum()) if not df_filtrado.empty else 0.0
         qtd = int(len(df_filtrado))
 
-        recebido = float(df_filtrado[df_filtrado["Status_norm"].isin(["pago", "finalizado"])]["Preço do serviço"].sum()) if not df_filtrado.empty else 0.0
-        a_receber = float(df_filtrado[df_filtrado["Status_norm"].isin(["pendente"])]["Preço do serviço"].sum()) if not df_filtrado.empty else 0.0
+        recebido = (
+            float(df_filtrado[df_filtrado["Status_norm"].isin(["pago", "finalizado"])]["Preço do serviço"].sum())
+            if not df_filtrado.empty else 0.0
+        )
+        a_receber = (
+            float(df_filtrado[df_filtrado["Status_norm"].isin(["pendente"])]["Preço do serviço"].sum())
+            if not df_filtrado.empty else 0.0
+        )
         cancelados_qtd = int((df_filtrado["Status_norm"] == "cancelado").sum()) if not df_filtrado.empty else 0
 
         m1, m2, m3, m4 = st.columns(4)
@@ -1646,30 +1709,32 @@ def tela_admin():
         m3.metric("A receber", fmt_brl(a_receber))
         m4.metric("Cancelados", f"{cancelados_qtd}")
 
-        # extras (mantém valor percebido sem poluir)
         ex1, ex2 = st.columns(2)
         ex1.metric("Total serviços (gerado)", fmt_brl(total_gerado))
         ex2.metric("Total sinais", fmt_brl(total_sinais))
 
         # --------- tabela (mais legível) ---------
         df_show = df_filtrado.sort_values(["Data_dt", "Horário", "status_ord"], ascending=[True, True, True]).copy()
-        df_show = df_show.drop(columns=["Data_dt"]).copy()
+
+        # ✅ remove colunas técnicas + remove "Criado em" (não serve mais)
+        drop_cols = [c for c in ["Data_dt", "Status_norm", "status_ord"] if c in df_show.columns]
+        df_show = df_show.drop(columns=drop_cols, errors="ignore")
+
+        if "Criado em" in df_show.columns:
+            df_show = df_show.drop(columns=["Criado em"], errors="ignore")
+
+        # formatação BRL
         df_show["Preço do serviço"] = df_show["Preço do serviço"].apply(lambda v: fmt_brl(float(v)))
         df_show["Sinal"] = df_show["Sinal"].apply(lambda v: fmt_brl(float(v)))
-        df_show["Status"] = df_show["Status_label"]
-
-        # remove colunas técnicas
-        drop_cols = [c for c in ["Status_norm", "Status_label", "status_ord"] if c in df_show.columns]
-        df_show = df_show.drop(columns=drop_cols)
 
         st.dataframe(
-            df_show.drop(columns=["id"]),
+            df_show.drop(columns=["id"], errors="ignore"),
             use_container_width=True,
             height=360
         )
 
         # ====================================================
-        # AÇÕES RÁPIDAS (com cancelado incluído)
+        # AÇÕES RÁPIDAS
         # ====================================================
         st.divider()
         st.subheader("⚡ Ações rápidas")
@@ -1679,13 +1744,14 @@ def tela_admin():
             if row.empty:
                 return str(ag_id)
             r = row.iloc[0]
+            # aqui mantemos o label simples no select (sem o "há X"),
+            # pra não ficar mudando enquanto você usa o selectbox
             return f"{r['Cliente']} • {r['Data']} {r['Horário']} • {STATUS_LABELS.get(r['Status_norm'], r['Status_norm'])}"
 
         colA, colB = st.columns(2)
 
         with colA:
             st.subheader("✅ Marcar como PAGO")
-            # recomenda mostrar primeiro pendentes
             pendentes_ids = df_admin[df_admin["Status_norm"] == "pendente"]["id"].tolist()
             ids_para_pagar = pendentes_ids if pendentes_ids else df_admin["id"].tolist()
 
@@ -1702,7 +1768,6 @@ def tela_admin():
 
         with colB:
             st.subheader("❌ Marcar como CANCELADO")
-            # pendente/pago/finalizado podem virar cancelado (você decide regra; aqui deixei liberar)
             ids_cancel = df_admin[df_admin["Status_norm"] != "cancelado"]["id"].tolist() or df_admin["id"].tolist()
 
             ag_cancel = st.selectbox(
@@ -1766,6 +1831,7 @@ def tela_admin():
       <a href="?logout=1">🚪 Sair</a>
     </div>
     """, unsafe_allow_html=True)
+
 
 # ============================================================
 # ROUTER
