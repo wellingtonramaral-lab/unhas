@@ -1153,7 +1153,7 @@ def menu_topo_comandos(access_token: str, tenant_id: str):
                 st.error("Não foi possível carregar seu perfil.")
                 return
 
-            nome = st.text_input("Nome do profissional", value=profile.get("nome") or "")
+            nome = st.text_input("Nome da loja", value=profile.get("nome") or "")
             whatsapp = st.text_input("WhatsApp (somente números)", value=profile.get("whatsapp") or "")
             pix_chave = st.text_input("Chave Pix", value=profile.get("pix_chave") or "")
             pix_nome = st.text_input("Nome do Pix", value=profile.get("pix_nome") or "")
