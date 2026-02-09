@@ -496,16 +496,57 @@ def get_auth_user(access_token: str):
 def carregar_profile(access_token: str):
     sb = sb_user(access_token)
     try:
-        uid = st.session_state["user"]["id"]
+        u = sb.auth.get_user(access_token).user
+        if not u:
+            return None
+
+        uid = u.id
+        email = u.email or ""
+
+        # tenta buscar
         resp = (
             sb.table("profiles")
             .select("id,email,nome,whatsapp,pix_chave,pix_nome,pix_cidade")
             .eq("id", uid)
-            .single()
+            .maybe_single()
             .execute()
         )
-        return resp.data
-    except Exception:
+
+        if resp and resp.data:
+            return resp.data
+
+        # se não existir, cria automaticamente (primeiro acesso)
+        ins = (
+            sb.table("profiles")
+            .insert(
+                {
+                    "id": uid,
+                    "email": email,
+                    "nome": "",
+                    "whatsapp": "",
+                    "pix_chave": "",
+                    "pix_nome": "",
+                    "pix_cidade": "",
+                }
+            )
+            .execute()
+        )
+
+        # retorna o recém-criado
+        return {
+            "id": uid,
+            "email": email,
+            "nome": "",
+            "whatsapp": "",
+            "pix_chave": "",
+            "pix_nome": "",
+            "pix_cidade": "",
+        }
+
+    except Exception as e:
+        # pra você enxergar o erro real quando acontecer
+        st.error("Erro ao carregar profile (debug):")
+        st.code(str(e))
         return None
 
 def salvar_profile(access_token: str, dados: dict):
