@@ -234,7 +234,7 @@ PUBLIC_APP_BASE_URL = st.secrets.get("PUBLIC_APP_BASE_URL", "").strip()
 SAAS_PIX_CHAVE = st.secrets.get("SAAS_PIX_CHAVE", "").strip()
 SAAS_PIX_NOME = st.secrets.get("SAAS_PIX_NOME", "Suporte").strip()
 SAAS_PIX_CIDADE = st.secrets.get("SAAS_PIX_CIDADE", "BRASIL").strip()
-SAAS_MENSAL_VALOR = st.secrets.get("SAAS_MENSAL_VALOR", "R$ 39,90").strip()
+SAAS_MENSAL_VALOR = st.secrets.get("SAAS_MENSAL_VALOR", "R$ 00,99").strip()
 SAAS_SUPORTE_WHATSAPP = st.secrets.get("SAAS_SUPORTE_WHATSAPP", "").strip()
 
 # Bucket do catálogo (Supabase Storage)
