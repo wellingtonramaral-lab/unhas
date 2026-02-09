@@ -1872,8 +1872,13 @@ def tela_admin():
         # ====================================================
         # AÇÕES RÁPIDAS
         # ====================================================
+        # AÇÕES RÁPIDAS
+        # ====================================================
         st.divider()
         st.subheader("⚡ Ações rápidas")
+
+        # ✅ legenda para evitar confusão (cancelar vs excluir)
+        st.caption("❌ **Cancelar** mantém o registro no histórico • 🗑️ **Excluir** remove definitivamente.")
 
         def fmt_ag(ag_id: int) -> str:
             row = df_admin[df_admin.id == ag_id]
@@ -1883,6 +1888,14 @@ def tela_admin():
             # aqui mantemos o label simples no select (sem o "há X"),
             # pra não ficar mudando enquanto você usa o selectbox
             return f"{r['Cliente']} • {r['Data']} {r['Horário']} • {STATUS_LABELS.get(r['Status_norm'], r['Status_norm'])}"
+
+        def resumo_ag(ag_id: int) -> str:
+            """Resumo fixo para usar em mensagens de sucesso/erro."""
+            row = df_admin[df_admin.id == ag_id]
+            if row.empty:
+                return f"ID {ag_id}"
+            r = row.iloc[0]
+            return f"{r['Cliente']} • {r['Data']} {r['Horário']}"
 
         colA, colB = st.columns(2)
 
@@ -1897,9 +1910,10 @@ def tela_admin():
                 format_func=fmt_ag,
                 key="pagar_select",
             )
+
             if st.button("Marcar como PAGO", type="primary", use_container_width=True):
                 marcar_status_admin(access_token, tenant_id, int(ag_pagar), "pago")
-                st.success("Agendamento marcado como PAGO.")
+                st.success(f"✅ Marcado como **PAGO**: {resumo_ag(int(ag_pagar))}")
                 st.rerun()
 
         with colB:
@@ -1912,9 +1926,10 @@ def tela_admin():
                 format_func=fmt_ag,
                 key="cancel_select",
             )
+
             if st.button("Marcar como CANCELADO", use_container_width=True):
                 marcar_status_admin(access_token, tenant_id, int(ag_cancel), "cancelado")
-                st.success("Agendamento marcado como CANCELADO.")
+                st.success(f"❌ Marcado como **CANCELADO**: {resumo_ag(int(ag_cancel))}")
                 st.rerun()
 
         st.subheader("🗑️ Excluir agendamento")
@@ -1925,9 +1940,16 @@ def tela_admin():
             key="excluir_select_unique",
         )
 
-        if st.button("Excluir agendamento", use_container_width=True):
+        # ✅ confirmação obrigatória (protege contra erro irreversível)
+        confirm_delete = st.checkbox(
+            "Confirmo que desejo excluir definitivamente este agendamento",
+            value=False,
+            key="confirm_delete_checkbox",
+        )
+
+        if st.button("Excluir agendamento", use_container_width=True, disabled=not confirm_delete):
             excluir_agendamento_admin(access_token, tenant_id, int(ag_excluir))
-            st.success("Agendamento excluído.")
+            st.success(f"🗑️ **Excluído definitivamente**: {resumo_ag(int(ag_excluir))}")
             st.rerun()
 
     st.divider()
