@@ -441,6 +441,36 @@ PUBLIC_TENANT_ID = (PUBLIC_TENANT_ID or "").strip()
 IS_PUBLIC = bool(PUBLIC_TENANT_ID)
 
 # ============================================================
+# TELA DE RESET DE SENHA
+# ============================================================
+def tela_reset_senha():
+    st.markdown("## 🔐 Redefinir senha")
+    st.caption("Abra este link a partir do email que enviamos.")
+
+    if not st.session_state.access_token:
+        st.warning("Abra o link de redefinição enviado por email (ele faz o login temporário).")
+        st.stop()
+
+    nova = st.text_input("Nova senha", type="password")
+    nova2 = st.text_input("Confirmar nova senha", type="password")
+
+    if st.button("Salvar nova senha", type="primary", use_container_width=True):
+        if not nova or len(nova) < 6:
+            st.error("A senha precisa ter pelo menos 6 caracteres.")
+            st.stop()
+        if nova != nova2:
+            st.error("As senhas não coincidem.")
+            st.stop()
+
+        try:
+            auth_update_password(st.session_state.access_token, nova)
+            st.success("✅ Senha atualizada! Faça login novamente.")
+            auth_logout()
+        except Exception as e:
+            st.error("Falha ao atualizar senha.")
+            st.code(str(e))
+
+# ============================================================
 # SESSION STATE
 # ============================================================
 if "access_token" not in st.session_state:
@@ -489,6 +519,16 @@ def get_auth_user(access_token: str):
         return out.user if out else None
     except Exception:
         return None
+
+def auth_send_reset_email(email: str):
+    sb = sb_anon()
+    base = (PUBLIC_APP_BASE_URL or "").rstrip("/")
+    redirect = f"{base}/?reset=1"
+    return sb.auth.reset_password_email(email, {"redirect_to": redirect})
+
+def auth_update_password(access_token: str, new_password: str):
+    sb = sb_user(access_token)
+    return sb.auth.update_user({"password": new_password})
 
 # ============================================================
 # PROFILE (ADMIN)
@@ -1639,6 +1679,20 @@ def tela_admin():
                     st.error("Falha no login.")
                     st.code(str(e))
 
+            st.markdown("---")
+            st.markdown("**Esqueceu a senha?**")
+            email_reset = st.text_input("Digite seu email para receber o link", key="reset_email")
+            if st.button("📩 Enviar link de redefinição", use_container_width=True):
+                try:
+                    if not email_reset.strip():
+                        st.error("Digite um email.")
+                        st.stop()
+                    auth_send_reset_email(email_reset.strip())
+                    st.success("Se o email existir, enviaremos um link para redefinir a senha. ✅")
+                except Exception as e:
+                    st.error("Não consegui enviar o email de redefinição.")
+                    st.code(str(e))
+
         with tab2:
             email = st.text_input("Email", key="cad_email")
             password = st.text_input("Senha", type="password", key="cad_pass")
@@ -2088,7 +2142,9 @@ def tela_admin():
 # ============================================================
 # ROUTER
 # ============================================================
-if IS_PUBLIC:
+if st.query_params.get("reset") == "1":
+    tela_reset_senha()
+elif IS_PUBLIC:
     tela_publica()
 else:
     tela_admin()
