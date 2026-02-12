@@ -9,6 +9,64 @@ import io
 import re
 import unicodedata
 from supabase import create_client
+from streamlit_js_eval import streamlit_js_eval
+
+def capture_recovery_token():
+    hash_value = streamlit_js_eval(
+        js_expressions="window.location.hash",
+        want_output=True,
+        key="hash_reader",
+    )
+
+    if hash_value and "access_token=" in hash_value:
+        parts = hash_value.replace("#", "").split("&")
+        data = dict(p.split("=") for p in parts if "=" in p)
+
+        token = data.get("access_token")
+        if token:
+            st.session_state.access_token = token
+            streamlit_js_eval(
+                js_expressions="window.location.hash = ''",
+                want_output=False,
+            )
+
+# ============================================================
+# RECOVERY MODE (reset de senha via Supabase)
+# ============================================================
+def handle_recovery_token():
+    params = st.experimental_get_query_params()
+
+    # quando o Supabase usa query (?access_token=)
+    if "access_token" in params:
+        st.session_state.access_token = params["access_token"][0]
+        st.query_params.clear()
+        return True
+
+    # quando vem via hash (#access_token=) — Streamlit não lê direto
+    try:
+        from streamlit_js_eval import streamlit_js_eval
+
+        token = streamlit_js_eval(
+            js_expressions="window.location.hash",
+            want_output=True,
+            key="hash_eval",
+        )
+
+        if token and "access_token=" in token:
+            parts = token.replace("#", "").split("&")
+            data = dict(p.split("=") for p in parts if "=" in p)
+
+            if "access_token" in data:
+                st.session_state.access_token = data["access_token"]
+                streamlit_js_eval(
+                    js_expressions="window.location.hash = ''",
+                    want_output=False,
+                )
+                return True
+    except Exception:
+        pass
+
+    return False
 
 # ============================================================
 # TIMEZONE Brasil (UTC-3)
@@ -448,7 +506,7 @@ def tela_reset_senha():
     st.caption("Abra este link a partir do email que enviamos.")
 
     if not st.session_state.access_token:
-        st.warning("Abra o link de redefinição enviado por email (ele faz o login temporário).")
+        st.warning("Link inválido ou expirado. Gere um novo pedido de redefinição.")
         st.stop()
 
     nova = st.text_input("Nova senha", type="password")
@@ -523,8 +581,14 @@ def get_auth_user(access_token: str):
 def auth_send_reset_email(email: str):
     sb = sb_anon()
     base = (PUBLIC_APP_BASE_URL or "").rstrip("/")
-    redirect = f"{base}/?reset=1"
-    return sb.auth.reset_password_email(email, {"redirect_to": redirect})
+    redirect = f"{base}/?reset=1&flow=recovery"
+    return sb.auth.reset_password_email(
+        email,
+        {
+            "redirect_to": redirect,
+            "type": "recovery",  # 👈 IMPORTANTE
+        },
+    )
 
 def auth_update_password(access_token: str, new_password: str):
     sb = sb_user(access_token)
@@ -2142,6 +2206,8 @@ def tela_admin():
 # ============================================================
 # ROUTER
 # ============================================================
+capture_recovery_token()
+
 if st.query_params.get("reset") == "1":
     tela_reset_senha()
 elif IS_PUBLIC:
