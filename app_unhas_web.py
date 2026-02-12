@@ -513,12 +513,19 @@ IS_PUBLIC = bool(PUBLIC_TENANT_ID)
 # ============================================================
 # TELA DE RESET DE SENHA
 # ============================================================
+import requests
+import streamlit as st
+
 def tela_reset_senha():
     st.markdown("## 🔐 Redefinir senha")
     st.caption("Abra este link a partir do email que enviamos.")
 
-    if not st.session_state.get("access_token"):
-        st.warning("Carregando token de recuperação...")
+    token = st.query_params.get("token")
+    typ = st.query_params.get("type")
+
+    # ✅ Agora validamos pelo token do query param (não por access_token)
+    if not token or typ != "recovery":
+        st.warning("Link inválido ou expirado. Gere um novo pedido de redefinição.")
         st.stop()
 
     nova = st.text_input("Nova senha", type="password")
@@ -532,13 +539,41 @@ def tela_reset_senha():
             st.error("As senhas não coincidem.")
             st.stop()
 
-        try:
-            auth_update_password(st.session_state.access_token, nova)
-            st.success("✅ Senha atualizada! Faça login novamente.")
-            auth_logout()
-        except Exception as e:
-            st.error("Falha ao atualizar senha.")
-            st.code(str(e))
+        # 1) Verifica token e pega sessão temporária
+        verify_url = f"{SUPABASE_URL}/auth/v1/verify"
+        r = requests.post(
+            verify_url,
+            json={"type": "recovery", "token": token},
+            headers={
+                "apikey": SUPABASE_ANON_KEY,
+                "Content-Type": "application/json",
+            },
+            timeout=20,
+        )
+
+        if r.status_code != 200:
+            st.error("Token inválido/expirado. Gere um novo pedido.")
+            st.code(r.text)
+            st.stop()
+
+        data = r.json()
+        access_token = data.get("access_token")
+
+        if not access_token:
+            st.error("Não recebi access_token do Supabase.")
+            st.code(data)
+            st.stop()
+
+        # 2) Atualiza senha autenticado com esse access_token
+        sb = sb_user(access_token)
+        sb.auth.update_user({"password": nova})
+
+        st.success("✅ Senha atualizada! Faça login novamente.")
+        st.query_params.clear()
+
+        # derruba sessão local do seu app (se você usa)
+        st.session_state.access_token = None
+        st.rerun()
 
 # ============================================================
 # SESSION STATE
@@ -598,7 +633,8 @@ def auth_send_reset_email(email: str):
         email,
         {
             "redirect_to": redirect,
-            "type": "recovery",  # 👈 IMPORTANTE
+            "type": "recovery",
+            "data": {"use_query_params": True}  # força Supabase a usar query params
         },
     )
 
@@ -2221,6 +2257,7 @@ def tela_admin():
 
 if st.query_params.get("reset") == "1":
     tela_reset_senha()
+    st.stop()
 elif IS_PUBLIC:
     tela_publica()
 else:
