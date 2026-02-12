@@ -10,48 +10,33 @@ import re
 import unicodedata
 from supabase import create_client
 from urllib.parse import parse_qs
-from streamlit_js_eval import get_page_location, streamlit_js_eval
+from streamlit_js_eval import get_page_location
 
 def capture_access_token_from_hash():
-    """
-    Captura #access_token=...&refresh_token=...&type=recovery
-    e salva em st.session_state.access_token
-    """
     loc = get_page_location()
-    h = (loc or {}).get("hash") or ""
-    if not h:
+    if not loc:
         return False
 
-    # remove o "#"
-    hash_params = h.lstrip("#")
-    qs = parse_qs(hash_params)
+    hash_value = loc.get("hash", "")
+    if not hash_value or "access_token=" not in hash_value:
+        return False
 
-    access_token = (qs.get("access_token") or [None])[0]
-    refresh_token = (qs.get("refresh_token") or [None])[0]
-    flow_type = (qs.get("type") or [None])[0]  # normalmente "recovery"
+    hash_value = hash_value.lstrip("#")
+    params = parse_qs(hash_value)
+
+    access_token = (params.get("access_token") or [None])[0]
 
     if access_token:
-        st.session_state.access_token = access_token
-        if refresh_token:
-            st.session_state.refresh_token = refresh_token
-        if flow_type:
-            st.session_state.recovery_type = flow_type
+        st.session_state["access_token"] = access_token
+        st.session_state["recovery_mode"] = True
 
-        # limpa o hash pra não ficar reaplicando e pra não expor token na URL
-        streamlit_js_eval(
-            js_expressions="window.location.hash='';",
-            want_output=False,
-            key="clear_hash",
-        )
-
-        return True
+        # força reload agora que temos token
+        st.experimental_rerun()
 
     return False
 
-# ✅ CHAME ANTES DE QUALQUER ROUTER/IF DE TELAS
-if capture_access_token_from_hash():
-    # força rerun para a tela de reset enxergar o token
-    st.rerun()
+# ✅ CHAME ASSIM (logo após os imports)
+capture_access_token_from_hash()
 
 # 👇 Só depois começa o resto do app
 if "page" not in st.session_state:
@@ -533,7 +518,7 @@ def tela_reset_senha():
     st.caption("Abra este link a partir do email que enviamos.")
 
     if not st.session_state.get("access_token"):
-        st.warning("Link inválido ou expirado. Gere um novo pedido de redefinição.")
+        st.warning("Carregando token de recuperação...")
         st.stop()
 
     nova = st.text_input("Nova senha", type="password")
