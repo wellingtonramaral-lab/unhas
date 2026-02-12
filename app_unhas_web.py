@@ -9,26 +9,21 @@ import io
 import re
 import unicodedata
 from supabase import create_client
-from streamlit_js_eval import streamlit_js_eval
+from streamlit_js_eval import get_page_location
 
-def capture_recovery_token():
-    hash_value = streamlit_js_eval(
-        js_expressions="window.location.hash",
-        want_output=True,
-        key="hash_reader",
-    )
+# 👇 FUNÇÃO
+def capture_access_token_from_hash():
+    loc = get_page_location()
+    if loc and "hash" in loc and loc["hash"]:
+        hash_params = loc["hash"].lstrip("#")
+        st.session_state["hash_params"] = hash_params
 
-    if hash_value and "access_token=" in hash_value:
-        parts = hash_value.replace("#", "").split("&")
-        data = dict(p.split("=") for p in parts if "=" in p)
+# 👇 CHAME AQUI (ANTES DE QUALQUER ROUTER)
+capture_access_token_from_hash()
 
-        token = data.get("access_token")
-        if token:
-            st.session_state.access_token = token
-            streamlit_js_eval(
-                js_expressions="window.location.hash = ''",
-                want_output=False,
-            )
+# 👇 Só depois começa o resto do app
+if "page" not in st.session_state:
+    st.session_state["page"] = "login"
 
 # ============================================================
 # RECOVERY MODE (reset de senha via Supabase)
@@ -2206,7 +2201,6 @@ def tela_admin():
 # ============================================================
 # ROUTER
 # ============================================================
-capture_recovery_token()
 
 if st.query_params.get("reset") == "1":
     tela_reset_senha()
