@@ -9,31 +9,14 @@ import io
 import re
 import unicodedata
 from supabase import create_client
-from urllib.parse import parse_qs
 from streamlit_js_eval import get_page_location
 
 def capture_access_token_from_hash():
     loc = get_page_location()
-    if not loc:
-        return False
-
-    hash_value = loc.get("hash", "")
-    if not hash_value or "access_token=" not in hash_value:
-        return False
-
-    hash_value = hash_value.lstrip("#")
-    params = parse_qs(hash_value)
-
-    access_token = (params.get("access_token") or [None])[0]
-
-    if access_token:
-        st.session_state["access_token"] = access_token
-        st.session_state["recovery_mode"] = True
-
-        # força reload agora que temos token
-        st.experimental_rerun()
-
-    return False
+    if loc and "search" in loc and loc["search"]:
+        query = urllib.parse.parse_qs(loc["search"].lstrip("?"))
+        if "token" in query:
+            st.session_state["recovery_token"] = query["token"][0]
 
 # ✅ CHAME ASSIM (logo após os imports)
 capture_access_token_from_hash()
@@ -513,37 +496,39 @@ IS_PUBLIC = bool(PUBLIC_TENANT_ID)
 # ============================================================
 # TELA DE RESET DE SENHA
 # ============================================================
-import requests
-import streamlit as st
-
 def tela_reset_senha():
     st.markdown("## 🔐 Redefinir senha")
     st.caption("Abra este link a partir do email que enviamos.")
 
-    token = st.query_params.get("token")
-    typ = st.query_params.get("type")
-
-    # ✅ Agora validamos pelo token do query param (não por access_token)
-    if not token or typ != "recovery":
-        st.warning("Link inválido ou expirado. Gere um novo pedido de redefinição.")
-        st.stop()
-
     nova = st.text_input("Nova senha", type="password")
-    nova2 = st.text_input("Confirmar nova senha", type="password")
+    confirmar = st.text_input("Confirmar senha", type="password")
+
+    import requests
 
     if st.button("Salvar nova senha", type="primary", use_container_width=True):
-        if not nova or len(nova) < 6:
-            st.error("A senha precisa ter pelo menos 6 caracteres.")
+
+        if not nova or not confirmar:
+            st.error("Preencha todos os campos.")
             st.stop()
-        if nova != nova2:
+
+        if nova != confirmar:
             st.error("As senhas não coincidem.")
             st.stop()
 
-        # 1) Verifica token e pega sessão temporária
+        token = st.session_state.get("recovery_token")
+
+        if not token:
+            st.error("Token inválido ou expirado.")
+            st.stop()
+
         verify_url = f"{SUPABASE_URL}/auth/v1/verify"
+
         r = requests.post(
             verify_url,
-            json={"type": "recovery", "token": token},
+            json={
+                "type": "recovery",
+                "token_hash": token  # 👈 IMPORTANTE: token_hash
+            },
             headers={
                 "apikey": SUPABASE_ANON_KEY,
                 "Content-Type": "application/json",
@@ -551,28 +536,26 @@ def tela_reset_senha():
             timeout=20,
         )
 
-        if r.status_code != 200:
-            st.error("Token inválido/expirado. Gere um novo pedido.")
-            st.code(r.text)
-            st.stop()
-
         data = r.json()
-        access_token = data.get("access_token")
 
-        if not access_token:
-            st.error("Não recebi access_token do Supabase.")
+        if r.status_code != 200:
+            st.error("Token inválido ou expirado. Gere um novo pedido.")
             st.code(data)
             st.stop()
 
-        # 2) Atualiza senha autenticado com esse access_token
-        sb = sb_user(access_token)
-        sb.auth.update_user({"password": nova})
+        access_token = data.get("access_token")
 
-        st.success("✅ Senha atualizada! Faça login novamente.")
-        st.query_params.clear()
+        if not access_token:
+            st.error("Falha ao obter sessão temporária.")
+            st.code(data)
+            st.stop()
 
-        # derruba sessão local do seu app (se você usa)
-        st.session_state.access_token = None
+        # Agora atualiza a senha
+        sb_temp = sb_user(access_token)
+        sb_temp.auth.update_user({"password": nova})
+
+        st.success("Senha atualizada com sucesso!")
+        st.session_state["page"] = "login"
         st.rerun()
 
 # ============================================================
