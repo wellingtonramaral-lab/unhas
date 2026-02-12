@@ -9,17 +9,49 @@ import io
 import re
 import unicodedata
 from supabase import create_client
-from streamlit_js_eval import get_page_location
+from urllib.parse import parse_qs
+from streamlit_js_eval import get_page_location, streamlit_js_eval
 
-# 👇 FUNÇÃO
 def capture_access_token_from_hash():
+    """
+    Captura #access_token=...&refresh_token=...&type=recovery
+    e salva em st.session_state.access_token
+    """
     loc = get_page_location()
-    if loc and "hash" in loc and loc["hash"]:
-        hash_params = loc["hash"].lstrip("#")
-        st.session_state["hash_params"] = hash_params
+    h = (loc or {}).get("hash") or ""
+    if not h:
+        return False
 
-# 👇 CHAME AQUI (ANTES DE QUALQUER ROUTER)
-capture_access_token_from_hash()
+    # remove o "#"
+    hash_params = h.lstrip("#")
+    qs = parse_qs(hash_params)
+
+    access_token = (qs.get("access_token") or [None])[0]
+    refresh_token = (qs.get("refresh_token") or [None])[0]
+    flow_type = (qs.get("type") or [None])[0]  # normalmente "recovery"
+
+    if access_token:
+        st.session_state.access_token = access_token
+        if refresh_token:
+            st.session_state.refresh_token = refresh_token
+        if flow_type:
+            st.session_state.recovery_type = flow_type
+
+        # limpa o hash pra não ficar reaplicando e pra não expor token na URL
+        streamlit_js_eval(
+            js_expressions="window.location.hash='';",
+            want_output=False,
+            key="clear_hash",
+        )
+
+        return True
+
+    return False
+
+# ✅ CHAME ANTES DE QUALQUER ROUTER/IF DE TELAS
+if capture_access_token_from_hash():
+    # força rerun para a tela de reset enxergar o token
+    st.rerun()
 
 # 👇 Só depois começa o resto do app
 if "page" not in st.session_state:
@@ -500,7 +532,7 @@ def tela_reset_senha():
     st.markdown("## 🔐 Redefinir senha")
     st.caption("Abra este link a partir do email que enviamos.")
 
-    if not st.session_state.access_token:
+    if not st.session_state.get("access_token"):
         st.warning("Link inválido ou expirado. Gere um novo pedido de redefinição.")
         st.stop()
 
