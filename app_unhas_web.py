@@ -511,7 +511,7 @@ def tela_reset_senha():
             st.error("As senhas não coincidem.")
             st.stop()
 
-        # 1) verify usando token_hash
+        # 1) Troca token_hash por sessão temporária
         verify_url = f"{SUPABASE_URL}/auth/v1/verify"
         r = requests.post(
             verify_url,
@@ -536,9 +536,23 @@ def tela_reset_senha():
             st.code(data)
             st.stop()
 
-        # 2) update password autenticado
-        sb = sb_user(access_token)
-        sb.auth.update_user({"password": nova})
+        # 2) Atualiza a senha via HTTP (sem depender de sessão do client)
+        update_url = f"{SUPABASE_URL}/auth/v1/user"
+        u = requests.put(
+            update_url,
+            json={"password": nova},
+            headers={
+                "apikey": SUPABASE_ANON_KEY,
+                "Authorization": f"Bearer {access_token}",
+                "Content-Type": "application/json",
+            },
+            timeout=20,
+        )
+
+        if u.status_code not in (200, 204):
+            st.error("Não consegui atualizar a senha.")
+            st.code(u.text)
+            st.stop()
 
         st.success("✅ Senha atualizada! Agora faça login.")
         st.query_params.clear()
