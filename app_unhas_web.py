@@ -610,15 +610,11 @@ def get_auth_user(access_token: str):
 
 def auth_send_reset_email(email: str):
     sb = sb_anon()
-    base = (PUBLIC_APP_BASE_URL or "").rstrip("/")
-    redirect = f"{base}/?reset=1&flow=recovery"
     return sb.auth.reset_password_email(
         email,
         {
-            "redirect_to": redirect,
-            "type": "recovery",
-            "data": {"use_query_params": True}  # força Supabase a usar query params
-        },
+            "redirect_to": "https://n2zxw5mtfmdyy25d9qgjba.streamlit.app/?reset=1"
+        }
     )
 
 def auth_update_password(access_token: str, new_password: str):
