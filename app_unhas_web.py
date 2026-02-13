@@ -786,10 +786,24 @@ def tela_onboarding(access_token: str, tenant: dict):
     if step == 2:
         st.markdown("### 2) Cadastre um serviço")
         services = settings_get_services(settings) or {}
+
         with st.container(border=True):
-            s_nome = st.text_input("Nome do serviço", placeholder="Ex.: Alongamento em gel", key="ob_serv_nome")
-            s_preco = st.number_input("Preço (R$)", min_value=0.0, value=0.0, step=1.0, key="ob_serv_preco")
-            if st.button("Adicionar serviço", use_container_width=True):
+            with st.form("ob_add_service", clear_on_submit=True):
+                s_nome = st.text_input(
+                    "Nome do serviço",
+                    placeholder="Ex.: Alongamento em gel",
+                    key="ob_serv_nome",
+                )
+                s_preco = st.number_input(
+                    "Preço (R$)",
+                    min_value=0.0,
+                    value=0.0,
+                    step=1.0,
+                    key="ob_serv_preco",
+                )
+                submitted = st.form_submit_button("Adicionar serviço", use_container_width=True)
+
+            if submitted:
                 nome = (s_nome or "").strip()
                 if not nome:
                     st.error("Digite o nome do serviço.")
@@ -798,28 +812,28 @@ def tela_onboarding(access_token: str, tenant: dict):
                     sdict = dict(settings.get("services") or {})
                     sdict[nome] = float(s_preco or 0.0)
                     settings["services"] = sdict
+
                     ok, err = save_tenant_settings_admin(access_token, tenant_id, settings)
                     if ok:
-                        st.success("Serviço adicionado.")
-                        st.session_state["ob_serv_nome"] = ""
-                        st.session_state["ob_serv_preco"] = 0.0
+                        st.success("✅ Serviço adicionado.")
                         st.rerun()
                     else:
                         st.error("Não consegui salvar. Tente novamente.")
                         st.code(err)
 
+        # recarrega pra mostrar atualizado
+        services = settings_get_services(get_tenant_settings_admin(access_token, tenant_id) or {}) or {}
         if services:
             st.caption("Serviços cadastrados:")
             st.write(list(services.keys())[:10])
 
-        c1, c2, c3 = st.columns([1,1,1])
+        c1, c2, c3 = st.columns([1, 1, 1])
         with c1:
             if st.button("⬅ Voltar", use_container_width=True):
                 st.session_state["onboarding_step"] = 1
                 st.rerun()
         with c2:
             if st.button("Continuar ➜", type="primary", use_container_width=True):
-                # permite seguir mesmo sem, mas recomenda
                 st.session_state["onboarding_step"] = 3
                 st.rerun()
         with c3:
@@ -1970,10 +1984,24 @@ def tela_onboarding(access_token: str, tenant: dict):
     if step == 2:
         st.markdown("### 2) Cadastre um serviço")
         services = settings_get_services(settings) or {}
+
         with st.container(border=True):
-            s_nome = st.text_input("Nome do serviço", placeholder="Ex.: Alongamento em gel", key="ob_serv_nome")
-            s_preco = st.number_input("Preço (R$)", min_value=0.0, value=0.0, step=1.0, key="ob_serv_preco")
-            if st.button("Adicionar serviço", use_container_width=True):
+            with st.form("ob_add_service", clear_on_submit=True):
+                s_nome = st.text_input(
+                    "Nome do serviço",
+                    placeholder="Ex.: Alongamento em gel",
+                    key="ob_serv_nome",
+                )
+                s_preco = st.number_input(
+                    "Preço (R$)",
+                    min_value=0.0,
+                    value=0.0,
+                    step=1.0,
+                    key="ob_serv_preco",
+                )
+                submitted = st.form_submit_button("Adicionar serviço", use_container_width=True)
+
+            if submitted:
                 nome = (s_nome or "").strip()
                 if not nome:
                     st.error("Digite o nome do serviço.")
@@ -1982,28 +2010,28 @@ def tela_onboarding(access_token: str, tenant: dict):
                     sdict = dict(settings.get("services") or {})
                     sdict[nome] = float(s_preco or 0.0)
                     settings["services"] = sdict
+
                     ok, err = save_tenant_settings_admin(access_token, tenant_id, settings)
                     if ok:
-                        st.success("Serviço adicionado.")
-                        st.session_state["ob_serv_nome"] = ""
-                        st.session_state["ob_serv_preco"] = 0.0
+                        st.success("✅ Serviço adicionado.")
                         st.rerun()
                     else:
                         st.error("Não consegui salvar. Tente novamente.")
                         st.code(err)
 
+        # recarrega pra mostrar atualizado
+        services = settings_get_services(get_tenant_settings_admin(access_token, tenant_id) or {}) or {}
         if services:
             st.caption("Serviços cadastrados:")
             st.write(list(services.keys())[:10])
 
-        c1, c2, c3 = st.columns([1,1,1])
+        c1, c2, c3 = st.columns([1, 1, 1])
         with c1:
             if st.button("⬅ Voltar", use_container_width=True):
                 st.session_state["onboarding_step"] = 1
                 st.rerun()
         with c2:
             if st.button("Continuar ➜", type="primary", use_container_width=True):
-                # permite seguir mesmo sem, mas recomenda
                 st.session_state["onboarding_step"] = 3
                 st.rerun()
         with c3:
