@@ -72,6 +72,17 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
+st.markdown("""
+<style>
+.card {
+    background: rgba(255,255,255,0.03);
+    padding: 25px;
+    border-radius: 12px;
+    border: 1px solid rgba(255,255,255,0.08);
+}
+</style>
+""", unsafe_allow_html=True)
+
 def apply_theme():
     st.markdown(
         """
@@ -1775,20 +1786,23 @@ def tela_admin():
             col_left, col_right = st.columns(2, gap="large")
 
             with col_left:
+                st.markdown('<div class="card">', unsafe_allow_html=True)
                 st.subheader("Criar conta")
                 email = st.text_input("Email", key="cad_email")
                 password = st.text_input("Senha", type="password", key="cad_pass")
-                if st.button("Criar conta", type="primary", use_container_width=True):
+                if st.button("🚀 Criar conta", type="primary", use_container_width=True):
                     try:
                         auth_signup(email, password)
                         st.success("Conta criada! Agora volte na aba Entrar e faça login.")
                     except Exception as e:
                         st.error("Falha ao criar conta.")
                         st.code(str(e))
+                st.markdown('</div>', unsafe_allow_html=True)
 
             with col_right:
+                st.markdown('<div class="card">', unsafe_allow_html=True)
                 st.subheader("Redefinir senha")
-                st.caption("Digite seu email para receber o link de redefinição.")
+                st.caption("Informe seu email cadastrado para redefinir sua senha.")
                 email_reset = st.text_input("Email", key="reset_email_side")
                 if st.button("📩 Enviar link de redefinição", use_container_width=True, key="btn_reset_side"):
                     try:
@@ -1800,6 +1814,7 @@ def tela_admin():
                     except Exception as e:
                         st.error("Não consegui enviar o email de redefinição.")
                         st.code(str(e))
+                st.markdown('</div>', unsafe_allow_html=True)
 
         st.stop()
 
