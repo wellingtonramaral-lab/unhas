@@ -74,14 +74,13 @@ st.set_page_config(
 
 st.markdown("""
 <style>
-.card {
-    background: rgba(255,255,255,0.03);
-    padding: 22px;
-    border-radius: 14px;
-    border: 1px solid rgba(255,255,255,0.08);
-    box-shadow: 0 8px 30px rgba(0,0,0,0.25);
+.card{
+  background: rgba(255,255,255,0.03);
+  padding: 22px;
+  border-radius: 14px;
+  border: 1px solid rgba(255,255,255,0.08);
+  box-shadow: 0 8px 30px rgba(0,0,0,0.25);
 }
-.card h3 { margin-top: 0.2rem; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -1791,11 +1790,10 @@ def tela_admin():
                 st.markdown('</div>', unsafe_allow_html=True)
 
             with tab2:
-                st.markdown('<div class="card">', unsafe_allow_html=True)
+                c1, c2 = st.columns(2, gap="large")
 
-                col_left, col_right = st.columns(2, gap="large")
-
-                with col_left:
+                with c1:
+                    st.markdown('<div class="card">', unsafe_allow_html=True)
                     st.markdown("### Criar conta")
                     email = st.text_input("Email", key="cad_email")
                     password = st.text_input("Senha", type="password", key="cad_pass")
@@ -1806,8 +1804,10 @@ def tela_admin():
                         except Exception as e:
                             st.error("Falha ao criar conta.")
                             st.code(str(e))
+                    st.markdown('</div>', unsafe_allow_html=True)
 
-                with col_right:
+                with c2:
+                    st.markdown('<div class="card">', unsafe_allow_html=True)
                     st.markdown("### Redefinir senha")
                     st.caption("Informe seu email cadastrado para redefinir sua senha.")
                     email_reset = st.text_input("Email", key="reset_email_side")
@@ -1821,8 +1821,7 @@ def tela_admin():
                         except Exception as e:
                             st.error("Não consegui enviar o email de redefinição.")
                             st.code(str(e))
-
-                st.markdown('</div>', unsafe_allow_html=True)
+                    st.markdown('</div>', unsafe_allow_html=True)
 
         st.stop()
 
