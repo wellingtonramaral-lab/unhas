@@ -74,12 +74,14 @@ st.set_page_config(
 
 st.markdown("""
 <style>
-[data-testid="stHorizontalBlock"] > div {
+.card {
     background: rgba(255,255,255,0.03);
-    padding: 25px;
-    border-radius: 12px;
+    padding: 22px;
+    border-radius: 14px;
     border: 1px solid rgba(255,255,255,0.08);
+    box-shadow: 0 8px 30px rgba(0,0,0,0.25);
 }
+.card h3 { margin-top: 0.2rem; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -1768,14 +1770,16 @@ def tela_admin():
     )
 
     if not st.session_state.access_token:
-        col1, col2, col3 = st.columns([1,3,1])
-        with col2:
+        colL, colC, colR = st.columns([1, 3, 1])
+        with colC:
             tab1, tab2 = st.tabs(["Entrar", "Criar conta"])
 
             with tab1:
+                st.markdown('<div class="card">', unsafe_allow_html=True)
+
                 email = st.text_input("Email", key="login_email")
                 password = st.text_input("Senha", type="password", key="login_pass")
-                if st.button("Entrar", type="primary"):
+                if st.button("Entrar", type="primary", use_container_width=True):
                     try:
                         res = auth_login(email, password)
                         st.session_state.access_token = res.session.access_token
@@ -1784,7 +1788,11 @@ def tela_admin():
                         st.error("Falha no login.")
                         st.code(str(e))
 
+                st.markdown('</div>', unsafe_allow_html=True)
+
             with tab2:
+                st.markdown('<div class="card">', unsafe_allow_html=True)
+
                 col_left, col_right = st.columns(2, gap="large")
 
                 with col_left:
@@ -1813,6 +1821,8 @@ def tela_admin():
                         except Exception as e:
                             st.error("Não consegui enviar o email de redefinição.")
                             st.code(str(e))
+
+                st.markdown('</div>', unsafe_allow_html=True)
 
         st.stop()
 
