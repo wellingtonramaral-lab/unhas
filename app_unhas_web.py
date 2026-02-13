@@ -72,13 +72,16 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
+# CSS para cards (visual SaaS)
 st.markdown("""
 <style>
-.card{
-  background: rgba(255,255,255,0.03);
-  padding: 22px;
-  border-radius: 14px;
-  border: 1px solid rgba(255,255,255,0.08);
+.card {
+    background: white;
+    border: 1px solid #e5e7eb;
+    border-radius: 12px;
+    padding: 1.5rem;
+    box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.1);
+    margin-bottom: 1rem;
   box-shadow: 0 8px 30px rgba(0,0,0,0.25);
 }
 </style>
@@ -1769,59 +1772,55 @@ def tela_admin():
     )
 
     if not st.session_state.access_token:
-        colL, colC, colR = st.columns([1, 3, 1])
+        # Centraliza o bloco de autenticação (visual mais SaaS)
+        colL, colC, colR = st.columns([1, 2, 1])
         with colC:
             tab1, tab2 = st.tabs(["Entrar", "Criar conta"])
 
             with tab1:
-                st.markdown('<div class="card">', unsafe_allow_html=True)
-
-                email = st.text_input("Email", key="login_email")
-                password = st.text_input("Senha", type="password", key="login_pass")
-                if st.button("Entrar", type="primary", use_container_width=True):
-                    try:
-                        res = auth_login(email, password)
-                        st.session_state.access_token = res.session.access_token
-                        st.rerun()
-                    except Exception as e:
-                        st.error("Falha no login.")
-                        st.code(str(e))
-
-                st.markdown('</div>', unsafe_allow_html=True)
+                with st.container(border=True):
+                    email = st.text_input("Email", key="login_email")
+                    password = st.text_input("Senha", type="password", key="login_pass")
+                    if st.button("Entrar", type="primary", use_container_width=True):
+                        try:
+                            res = auth_login(email, password)
+                            st.session_state.access_token = res.session.access_token
+                            st.rerun()
+                        except Exception as e:
+                            st.error("Falha no login.")
+                            st.code(str(e))
 
             with tab2:
                 c1, c2 = st.columns(2, gap="large")
 
                 with c1:
-                    st.markdown('<div class="card">', unsafe_allow_html=True)
-                    st.markdown("### Criar conta")
-                    email = st.text_input("Email", key="cad_email")
-                    password = st.text_input("Senha", type="password", key="cad_pass")
-                    if st.button("🚀 Criar conta", type="primary", use_container_width=True):
-                        try:
-                            auth_signup(email, password)
-                            st.success("Conta criada! Agora volte na aba Entrar e faça login.")
-                        except Exception as e:
-                            st.error("Falha ao criar conta.")
-                            st.code(str(e))
-                    st.markdown('</div>', unsafe_allow_html=True)
+                    with st.container(border=True):
+                        st.markdown("### Criar conta")
+                        email = st.text_input("Email", key="cad_email")
+                        password = st.text_input("Senha", type="password", key="cad_pass")
+                        if st.button("🚀 Criar conta", type="primary", use_container_width=True):
+                            try:
+                                auth_signup(email, password)
+                                st.success("Conta criada! Agora volte na aba **Entrar** e faça login.")
+                            except Exception as e:
+                                st.error("Falha ao criar conta.")
+                                st.code(str(e))
 
                 with c2:
-                    st.markdown('<div class="card">', unsafe_allow_html=True)
-                    st.markdown("### Redefinir senha")
-                    st.caption("Informe seu email cadastrado para redefinir sua senha.")
-                    email_reset = st.text_input("Email", key="reset_email_side")
-                    if st.button("📩 Enviar link de redefinição", use_container_width=True, key="btn_reset_side"):
-                        try:
-                            if not email_reset.strip():
-                                st.error("Digite um email.")
-                                st.stop()
-                            auth_send_reset_email(email_reset.strip())
-                            st.success("Se o email existir, enviaremos um link para redefinir a senha. ✅")
-                        except Exception as e:
-                            st.error("Não consegui enviar o email de redefinição.")
-                            st.code(str(e))
-                    st.markdown('</div>', unsafe_allow_html=True)
+                    with st.container(border=True):
+                        st.markdown("### Redefinir senha")
+                        st.caption("Informe seu email cadastrado para redefinir sua senha.")
+                        email_reset = st.text_input("Email", key="reset_email_side")
+                        if st.button("📩 Enviar link de redefinição", use_container_width=True, key="btn_reset_side"):
+                            try:
+                                if not email_reset.strip():
+                                    st.error("Digite um email.")
+                                    st.stop()
+                                auth_send_reset_email(email_reset.strip())
+                                st.success("Se o email existir, enviaremos um link para redefinir a senha. ✅")
+                            except Exception as e:
+                                st.error("Não consegui enviar o email de redefinição.")
+                                st.code(str(e))
 
         st.stop()
 
