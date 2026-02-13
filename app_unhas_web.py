@@ -72,21 +72,6 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-# CSS para cards (visual SaaS)
-st.markdown("""
-<style>
-.card {
-    background: white;
-    border: 1px solid #e5e7eb;
-    border-radius: 12px;
-    padding: 1.5rem;
-    box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.1);
-    margin-bottom: 1rem;
-  box-shadow: 0 8px 30px rgba(0,0,0,0.25);
-}
-</style>
-""", unsafe_allow_html=True)
-
 def apply_theme():
     st.markdown(
         """
@@ -734,6 +719,176 @@ def save_tenant_settings_admin(access_token: str, tenant_id: str, settings: dict
         return True, ""
     except Exception as e:
         return False, str(e)
+
+# ============================================================
+# ONBOARDING (primeira configuração após criar conta)
+# ============================================================
+def settings_is_onboarding_done(settings: dict) -> bool:
+    try:
+        return bool(settings.get("onboarding_done", False))
+    except Exception:
+        return False
+
+def mark_onboarding_done(access_token: str, tenant_id: str, settings: dict):
+    settings = dict(settings or {})
+    settings["onboarding_done"] = True
+    ok, err = save_tenant_settings_admin(access_token, tenant_id, settings)
+    return ok, err
+
+def tela_onboarding(access_token: str, tenant: dict):
+    """
+    Wizard simples para o usuário configurar o básico e começar a usar.
+    Mostra apenas quando settings['onboarding_done'] != True.
+    """
+    tenant_id = str(tenant.get("id"))
+    user = get_auth_user(access_token)
+    uid = str(getattr(user, "id", "")) if user else ""
+
+    settings = get_tenant_settings_admin(access_token, tenant_id) or {}
+    if settings_is_onboarding_done(settings):
+        return True  # já concluído
+
+    st.markdown("## 🎉 Bem-vindo ao Agenda‑Pro")
+    st.caption("Vamos configurar o básico em menos de 2 minutos.")
+
+    # passo atual
+    step = int(st.session_state.get("onboarding_step", 1))
+    total_steps = 4
+    st.progress(min(step, total_steps) / total_steps)
+
+    # -------- Passo 1: WhatsApp --------
+    if step == 1:
+        st.markdown("### 1) Seu WhatsApp")
+        w_cur = (tenant.get("whatsapp_numero") or "").strip()
+        w = st.text_input("Número do WhatsApp (com DDD)", value=w_cur, placeholder="Ex.: 11999999999", key="ob_whats")
+        st.caption("Esse número será usado para gerar o link wa.me na confirmação do agendamento.")
+
+        c1, c2 = st.columns([1, 1])
+        with c1:
+            if st.button("Continuar ➜", type="primary", use_container_width=True):
+                ok = True
+                if uid:
+                    try:
+                        atualizar_tenant_whatsapp(access_token, uid, tenant_id, w)
+                    except Exception:
+                        ok = False
+                # mesmo se falhar, deixa seguir (usuário pode ajustar depois)
+                st.session_state["onboarding_step"] = 2
+                st.rerun()
+        with c2:
+            if st.button("Pular", use_container_width=True):
+                st.session_state["onboarding_step"] = 2
+                st.rerun()
+
+        st.stop()
+
+    # -------- Passo 2: Serviços --------
+    if step == 2:
+        st.markdown("### 2) Cadastre um serviço")
+        services = settings_get_services(settings) or {}
+        with st.container(border=True):
+            s_nome = st.text_input("Nome do serviço", placeholder="Ex.: Alongamento em gel", key="ob_serv_nome")
+            s_preco = st.number_input("Preço (R$)", min_value=0.0, value=0.0, step=1.0, key="ob_serv_preco")
+            if st.button("Adicionar serviço", use_container_width=True):
+                nome = (s_nome or "").strip()
+                if not nome:
+                    st.error("Digite o nome do serviço.")
+                else:
+                    settings = dict(settings or {})
+                    sdict = dict(settings.get("services") or {})
+                    sdict[nome] = float(s_preco or 0.0)
+                    settings["services"] = sdict
+                    ok, err = save_tenant_settings_admin(access_token, tenant_id, settings)
+                    if ok:
+                        st.success("Serviço adicionado.")
+                        st.session_state["ob_serv_nome"] = ""
+                        st.session_state["ob_serv_preco"] = 0.0
+                        st.rerun()
+                    else:
+                        st.error("Não consegui salvar. Tente novamente.")
+                        st.code(err)
+
+        if services:
+            st.caption("Serviços cadastrados:")
+            st.write(list(services.keys())[:10])
+
+        c1, c2, c3 = st.columns([1,1,1])
+        with c1:
+            if st.button("⬅ Voltar", use_container_width=True):
+                st.session_state["onboarding_step"] = 1
+                st.rerun()
+        with c2:
+            if st.button("Continuar ➜", type="primary", use_container_width=True):
+                # permite seguir mesmo sem, mas recomenda
+                st.session_state["onboarding_step"] = 3
+                st.rerun()
+        with c3:
+            if st.button("Pular", use_container_width=True):
+                st.session_state["onboarding_step"] = 3
+                st.rerun()
+
+        st.stop()
+
+    # -------- Passo 3: Sinal (opcional) --------
+    if step == 3:
+        st.markdown("### 3) Sinal via Pix (opcional)")
+        dep = settings_get_deposit(settings)
+        enabled = bool(dep.get("enabled", True))
+        value = float(dep.get("value", VALOR_SINAL_FIXO))
+
+        enabled_new = st.toggle("Ativar sinal", value=enabled, key="ob_dep_enabled")
+        value_new = st.number_input("Valor do sinal (R$)", min_value=0.0, value=float(value), step=1.0, key="ob_dep_value")
+        st.caption("Você pode alterar isso depois nas configurações.")
+
+        if st.button("Salvar e continuar ➜", type="primary", use_container_width=True):
+            settings = dict(settings or {})
+            settings["deposit"] = {"enabled": bool(enabled_new), "value": float(value_new)}
+            ok, err = save_tenant_settings_admin(access_token, tenant_id, settings)
+            if ok:
+                st.session_state["onboarding_step"] = 4
+                st.rerun()
+            else:
+                st.error("Não consegui salvar. Tente novamente.")
+                st.code(err)
+
+        if st.button("⬅ Voltar", use_container_width=True):
+            st.session_state["onboarding_step"] = 2
+            st.rerun()
+
+        st.stop()
+
+    # -------- Passo 4: Link público --------
+    if step == 4:
+        st.markdown("### 4) Seu link de agendamento")
+        base = st.session_state.get("APP_URL") or ""
+        # fallback: tenta montar com location
+        if not base:
+            try:
+                loc = get_page_location()
+                base = (loc or {}).get("origin", "")
+            except Exception:
+                base = ""
+        if base:
+            link = f"{base}/?t={tenant_id}"
+        else:
+            link = f"?t={tenant_id}"
+
+        st.write("Copie e cole esse link na sua bio ou envie para seus clientes:")
+        st.code(link)
+
+        st.success("Pronto! Você já pode começar a receber agendamentos. ✅")
+
+        if st.button("Concluir", type="primary", use_container_width=True):
+            ok, err = mark_onboarding_done(access_token, tenant_id, settings)
+            st.session_state.pop("onboarding_step", None)
+            if ok:
+                st.rerun()
+            else:
+                st.error("Não consegui finalizar o onboarding.")
+                st.code(err)
+
+        st.stop()
+
 
 def settings_get_services(settings: dict):
     s = settings.get("services")
@@ -1750,6 +1905,175 @@ def tela_publica():
                     st.divider()
 
 # ============================================================
+# ONBOARDING (primeiro acesso)
+# ============================================================
+def settings_is_onboarding_done(settings: dict) -> bool:
+    try:
+        return bool(settings.get("onboarding_done", False))
+    except Exception:
+        return False
+
+def mark_onboarding_done(access_token: str, tenant_id: str, settings: dict):
+    settings = dict(settings or {})
+    settings["onboarding_done"] = True
+    ok, err = save_tenant_settings_admin(access_token, tenant_id, settings)
+    return ok, err
+
+def tela_onboarding(access_token: str, tenant: dict):
+    """
+    Wizard simples para o usuário configurar o básico e começar a usar.
+    Mostra apenas quando settings['onboarding_done'] != True.
+    """
+    tenant_id = str(tenant.get("id"))
+    user = get_auth_user(access_token)
+    uid = str(getattr(user, "id", "")) if user else ""
+
+    settings = get_tenant_settings_admin(access_token, tenant_id) or {}
+    if settings_is_onboarding_done(settings):
+        return True  # já concluído
+
+    st.markdown("## 🎉 Bem-vindo ao Agenda‑Pro")
+    st.caption("Vamos configurar o básico em menos de 2 minutos.")
+
+    # passo atual
+    step = int(st.session_state.get("onboarding_step", 1))
+    total_steps = 4
+    st.progress(min(step, total_steps) / total_steps)
+
+    # -------- Passo 1: WhatsApp --------
+    if step == 1:
+        st.markdown("### 1) Seu WhatsApp")
+        w_cur = (tenant.get("whatsapp_numero") or "").strip()
+        w = st.text_input("Número do WhatsApp (com DDD)", value=w_cur, placeholder="Ex.: 11999999999", key="ob_whats")
+        st.caption("Esse número será usado para gerar o link wa.me na confirmação do agendamento.")
+
+        c1, c2 = st.columns([1, 1])
+        with c1:
+            if st.button("Continuar ➜", type="primary", use_container_width=True):
+                ok = True
+                if uid:
+                    try:
+                        atualizar_tenant_whatsapp(access_token, uid, tenant_id, w)
+                    except Exception:
+                        ok = False
+                # mesmo se falhar, deixa seguir (usuário pode ajustar depois)
+                st.session_state["onboarding_step"] = 2
+                st.rerun()
+        with c2:
+            if st.button("Pular", use_container_width=True):
+                st.session_state["onboarding_step"] = 2
+                st.rerun()
+
+        st.stop()
+
+    # -------- Passo 2: Serviços --------
+    if step == 2:
+        st.markdown("### 2) Cadastre um serviço")
+        services = settings_get_services(settings) or {}
+        with st.container(border=True):
+            s_nome = st.text_input("Nome do serviço", placeholder="Ex.: Alongamento em gel", key="ob_serv_nome")
+            s_preco = st.number_input("Preço (R$)", min_value=0.0, value=0.0, step=1.0, key="ob_serv_preco")
+            if st.button("Adicionar serviço", use_container_width=True):
+                nome = (s_nome or "").strip()
+                if not nome:
+                    st.error("Digite o nome do serviço.")
+                else:
+                    settings = dict(settings or {})
+                    sdict = dict(settings.get("services") or {})
+                    sdict[nome] = float(s_preco or 0.0)
+                    settings["services"] = sdict
+                    ok, err = save_tenant_settings_admin(access_token, tenant_id, settings)
+                    if ok:
+                        st.success("Serviço adicionado.")
+                        st.session_state["ob_serv_nome"] = ""
+                        st.session_state["ob_serv_preco"] = 0.0
+                        st.rerun()
+                    else:
+                        st.error("Não consegui salvar. Tente novamente.")
+                        st.code(err)
+
+        if services:
+            st.caption("Serviços cadastrados:")
+            st.write(list(services.keys())[:10])
+
+        c1, c2, c3 = st.columns([1,1,1])
+        with c1:
+            if st.button("⬅ Voltar", use_container_width=True):
+                st.session_state["onboarding_step"] = 1
+                st.rerun()
+        with c2:
+            if st.button("Continuar ➜", type="primary", use_container_width=True):
+                # permite seguir mesmo sem, mas recomenda
+                st.session_state["onboarding_step"] = 3
+                st.rerun()
+        with c3:
+            if st.button("Pular", use_container_width=True):
+                st.session_state["onboarding_step"] = 3
+                st.rerun()
+
+        st.stop()
+
+    # -------- Passo 3: Sinal (opcional) --------
+    if step == 3:
+        st.markdown("### 3) Sinal via Pix (opcional)")
+        dep = settings_get_deposit(settings)
+        enabled = bool(dep.get("enabled", True))
+        value = float(dep.get("value", VALOR_SINAL_FIXO))
+
+        enabled_new = st.toggle("Ativar sinal", value=enabled, key="ob_dep_enabled")
+        value_new = st.number_input("Valor do sinal (R$)", min_value=0.0, value=float(value), step=1.0, key="ob_dep_value")
+        st.caption("Você pode alterar isso depois nas configurações.")
+
+        if st.button("Salvar e continuar ➜", type="primary", use_container_width=True):
+            settings = dict(settings or {})
+            settings["deposit"] = {"enabled": bool(enabled_new), "value": float(value_new)}
+            ok, err = save_tenant_settings_admin(access_token, tenant_id, settings)
+            if ok:
+                st.session_state["onboarding_step"] = 4
+                st.rerun()
+            else:
+                st.error("Não consegui salvar. Tente novamente.")
+                st.code(err)
+
+        if st.button("⬅ Voltar", use_container_width=True):
+            st.session_state["onboarding_step"] = 2
+            st.rerun()
+
+        st.stop()
+
+    # -------- Passo 4: Link público --------
+    if step == 4:
+        st.markdown("### 4) Seu link de agendamento")
+        base = st.session_state.get("APP_URL") or ""
+        # fallback: tenta montar com location
+        if not base:
+            try:
+                loc = get_page_location()
+                base = (loc or {}).get("origin", "")
+            except Exception:
+                base = ""
+        if base:
+            link = f"{base}/?t={tenant_id}"
+        else:
+            link = f"?t={tenant_id}"
+
+        st.write("Copie e cole esse link na sua bio ou envie para seus clientes:")
+        st.code(link)
+
+        st.success("Pronto! Você já pode começar a receber agendamentos. ✅")
+
+        if st.button("Concluir", type="primary", use_container_width=True):
+            ok, err = mark_onboarding_done(access_token, tenant_id, settings)
+            st.session_state.pop("onboarding_step", None)
+            if ok:
+                st.rerun()
+            else:
+                st.error("Não consegui finalizar o onboarding.")
+                st.code(err)
+
+        st.stop()
+
+# ============================================================
 # UI: MODO ADMIN (PROFISSIONAL)
 # ============================================================
 def tela_admin():
@@ -1948,6 +2272,9 @@ def tela_admin():
         st.stop()
 
     tenant_id = str(tenant.get("id"))
+
+    # Onboarding (primeiro acesso)
+    tela_onboarding(access_token, tenant)
 
     menu_topo_comandos(access_token, tenant_id)
 
