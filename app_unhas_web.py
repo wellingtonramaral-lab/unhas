@@ -1771,30 +1771,35 @@ def tela_admin():
                     st.error("Falha no login.")
                     st.code(str(e))
 
-            st.markdown("---")
-            st.markdown("**Esqueceu a senha?**")
-            email_reset = st.text_input("Digite seu email para receber o link", key="reset_email")
-            if st.button("📩 Enviar link de redefinição", use_container_width=True):
-                try:
-                    if not email_reset.strip():
-                        st.error("Digite um email.")
-                        st.stop()
-                    auth_send_reset_email(email_reset.strip())
-                    st.success("Se o email existir, enviaremos um link para redefinir a senha. ✅")
-                except Exception as e:
-                    st.error("Não consegui enviar o email de redefinição.")
-                    st.code(str(e))
-
         with tab2:
-            email = st.text_input("Email", key="cad_email")
-            password = st.text_input("Senha", type="password", key="cad_pass")
-            if st.button("Criar conta", type="primary"):
-                try:
-                    auth_signup(email, password)
-                    st.success("Conta criada! Agora volte na aba Entrar e faça login.")
-                except Exception as e:
-                    st.error("Falha ao criar conta.")
-                    st.code(str(e))
+            col_left, col_right = st.columns(2, gap="large")
+
+            with col_left:
+                st.subheader("Criar conta")
+                email = st.text_input("Email", key="cad_email")
+                password = st.text_input("Senha", type="password", key="cad_pass")
+                if st.button("Criar conta", type="primary", use_container_width=True):
+                    try:
+                        auth_signup(email, password)
+                        st.success("Conta criada! Agora volte na aba Entrar e faça login.")
+                    except Exception as e:
+                        st.error("Falha ao criar conta.")
+                        st.code(str(e))
+
+            with col_right:
+                st.subheader("Redefinir senha")
+                st.caption("Digite seu email para receber o link de redefinição.")
+                email_reset = st.text_input("Email", key="reset_email_side")
+                if st.button("📩 Enviar link de redefinição", use_container_width=True, key="btn_reset_side"):
+                    try:
+                        if not email_reset.strip():
+                            st.error("Digite um email.")
+                            st.stop()
+                        auth_send_reset_email(email_reset.strip())
+                        st.success("Se o email existir, enviaremos um link para redefinir a senha. ✅")
+                    except Exception as e:
+                        st.error("Não consegui enviar o email de redefinição.")
+                        st.code(str(e))
 
         st.stop()
 
