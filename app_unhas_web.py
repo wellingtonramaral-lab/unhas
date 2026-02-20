@@ -1350,7 +1350,11 @@ def montar_mensagem_pagamento_cliente(
 
     servs = normalizar_servicos(servicos)
     total = calcular_total_servicos(servs, services_map)
-    lista = "\n".join([f"• {s} ({fmt_brl(services_map.get(s, 0.0))})" for s in servs]) if servs else "-"
+    if servs:
+        lista = "\n".join([f"• {s} ({fmt_brl(services_map.get(s, 0.0))})" for s in servs])
+    else:
+        lista = "-"
+
     msg = (
         "Olá! Quero agendar um atendimento.\n\n"
         f"👤 Cliente: {nome}\n"
@@ -1371,7 +1375,9 @@ def montar_mensagem_pagamento_cliente(
         )
     else:
         msg += "\n📌 Me confirme por aqui que eu valido o agendamento. 🙏"
-    return msg
+
+    # Normaliza unicode antes de retornar
+    return unicodedata.normalize("NFC", msg)
 
 # ============================================================
 # HORÁRIOS (usando settings)
