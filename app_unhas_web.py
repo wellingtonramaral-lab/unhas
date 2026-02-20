@@ -1345,38 +1345,43 @@ def montar_mensagem_pagamento_cliente(
     services_map: dict,
     deposit_cfg: dict | None = None,
 ):
+    """
+    Versão SEM emojis para evitar caracteres quebrados (�) no WhatsApp.
+    """
     deposit_cfg = deposit_cfg or {"enabled": True, "value": float(valor_sinal)}
     deposit_on = bool(deposit_cfg.get("enabled", True)) and float(valor_sinal or 0) > 0
 
     servs = normalizar_servicos(servicos)
     total = calcular_total_servicos(servs, services_map)
+
     if servs:
-        lista = "\n".join([f"• {s} ({fmt_brl(services_map.get(s, 0.0))})" for s in servs])
+        lista = "\n".join([f"- {s} ({fmt_brl(services_map.get(s, 0.0))})" for s in servs])
     else:
         lista = "-"
 
     msg = (
         "Olá! Quero agendar um atendimento.\n\n"
-        f"👤 Cliente: {nome}\n"
-        f"📅 Data: {data_atendimento.strftime('%d/%m/%Y')}\n"
-        f"⏰ Horário: {horario}\n"
-        "🧾 Serviço(s):\n"
+        f"Cliente: {nome}\n"
+        f"Data: {data_atendimento.strftime('%d/%m/%Y')}\n"
+        f"Horário: {horario}\n"
+        "Serviço(s):\n"
         f"{lista}\n\n"
-        f"💰 Total: {fmt_brl(total)}\n"
+        f"Total: {fmt_brl(total)}\n"
     )
+
     if deposit_on:
         msg += (
-            f"✅ Sinal: {fmt_brl(valor_sinal)}\n\n"
+            f"Sinal: {fmt_brl(valor_sinal)}\n\n"
             "Pix para pagamento do sinal:\n"
-            f"🔑 Chave Pix: {pix_chave}\n"
-            f"👤 Nome: {pix_nome}\n"
-            f"🏙️ Cidade: {pix_cidade}\n\n"
-            "📌 Após pagar, envie o comprovante aqui para eu confirmar como PAGO. 🙏"
+            f"Chave Pix: {pix_chave}\n"
+            f"Nome: {pix_nome}\n"
+            f"Cidade: {pix_cidade}\n\n"
+            "Após pagar, envie o comprovante aqui para eu confirmar como PAGO."
         )
     else:
-        msg += "\n📌 Me confirme por aqui que eu valido o agendamento. 🙏"
+        msg += "\nMe confirme por aqui que eu valido o agendamento."
 
-    # Normaliza unicode antes de retornar
+    # Normaliza unicode antes de retornar (mantém seguro)
     return unicodedata.normalize("NFC", msg)
 
 # ============================================================
