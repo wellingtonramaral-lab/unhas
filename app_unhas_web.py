@@ -3251,3 +3251,45 @@ st.markdown("""
 }
 </style>
 """, unsafe_allow_html=True)
+
+
+
+# ===============================
+# V9 — Fix duplicated avatar render (hide legacy st.image avatar) + hard size lock
+# ===============================
+st.markdown("""
+<style>
+/* Streamlit sometimes renders a legacy st.image() avatar inside the hero without our classes.
+   Hide any hero images that are NOT the premium avatar image. */
+.nd-hero img:not(.nd-avatar-img){
+  display: none !important;
+}
+
+/* Extra hard lock to prevent any stretching */
+.nd-avatar-wrap{
+  width: clamp(120px, 32vw, 170px) !important;
+  height: clamp(120px, 32vw, 170px) !important;
+  max-width: 170px !important;
+  max-height: 170px !important;
+}
+
+.nd-avatar-inner{
+  width: 100% !important;
+  height: 100% !important;
+}
+
+.nd-avatar-img{
+  width: 100% !important;
+  height: 100% !important;
+  max-width: 100% !important;
+  max-height: 100% !important;
+  object-fit: cover !important;
+  border-radius: 999px !important;
+}
+
+/* Prevent the hero from letting any element overflow weirdly */
+.nd-hero{
+  overflow: hidden !important;
+}
+</style>
+""", unsafe_allow_html=True)
