@@ -1526,15 +1526,8 @@ def menu_topo_comandos(access_token: str, tenant_id: str):
             avatar_cur = str(settings_here.get("avatar_url") or settings_here.get("profile_photo_url") or "").strip()
 
             st.markdown("#### 📷 Foto do perfil")
-
             if avatar_cur:
-                st.markdown(f"""
-                <div class="nd-avatar-wrap">
-                    <div class="nd-avatar-inner">
-                        <img class="nd-avatar-img" src="{avatar_cur}">
-                    </div>
-                </div>
-                """, unsafe_allow_html=True)
+                st.image(avatar_cur, width=120)
                 st.caption("Dica: use uma foto bem nítida do rosto (melhora a conversão).")
 
             up_avatar = st.file_uploader(
@@ -2051,32 +2044,33 @@ def tela_publica():
 
     st.markdown('<div class="nd-hero">', unsafe_allow_html=True)
 
-# V11: Remove any duplicated huge avatar images injected by Streamlit (runtime DOM fix)
-components.html("""
-<script>
-(function(){
-  function cleanup(){
-    try{
-      const keep = document.querySelector('img.nd-avatar-img');
-      const imgs = Array.from(document.querySelectorAll('img'));
-      imgs.forEach(img=>{
-        if(keep && img === keep) return;
-        const r = img.getBoundingClientRect();
-        // only affect very top of page, and only huge images
-        if(r.top < 650 && r.width > 260 && r.height > 260){
-          img.style.display = 'none';
-        }
-      });
-    }catch(e){}
-  }
-  // run multiple times to survive rerenders
-  cleanup();
-  setTimeout(cleanup, 250);
-  setTimeout(cleanup, 800);
-  setTimeout(cleanup, 1500);
-})();
-</script>
-""", height=0)
+    # V13: Remove any duplicated huge avatar images injected by Streamlit (runtime DOM fix)
+    components.html("""
+    <script>
+    (function(){
+      function cleanup(){
+        try{
+          const keep = document.querySelector("img.nd-avatar-img");
+          const imgs = Array.from(document.querySelectorAll("img"));
+          imgs.forEach(img=>{
+            if(keep && img === keep) return;
+            const r = img.getBoundingClientRect();
+            // only affect very top of page, and only huge images
+            if(r.top < 700 && r.width > 260 && r.height > 260){
+              img.style.display = "none";
+            }
+          });
+        }catch(e){}
+      }
+      cleanup();
+      setTimeout(cleanup, 250);
+      setTimeout(cleanup, 800);
+      setTimeout(cleanup, 1600);
+    })();
+    </script>
+    """, height=0)
+
+
 
 
     if avatar_url:
