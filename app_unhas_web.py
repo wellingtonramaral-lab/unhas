@@ -1997,18 +1997,38 @@ def tela_publica():
 
     # Botão fixo para converter mais (scroll para área de agendamento)
     st.markdown(
-        """
+        f"""
         <div class="nd-fixed-cta">
-          <a href="#agendar">💅 Agendar agora</a>
+          <a href="?t={PUBLIC_TENANT_ID}&view=agendar">💅 Agendar agora</a>
         </div>
         """,
         unsafe_allow_html=True,
     )
 
-    aba_agendar, aba_catalogo = st.tabs(["📅 Agendamento", "📒 Catálogo"])
+    # Navegação (robusta no Streamlit): usa query param ?view=agendar|catalogo
+    view = st.query_params.get("view")
+    if isinstance(view, list):
+        view = view[0]
+    view = (view or "").strip().lower()
 
-    with aba_agendar:
-        st.markdown('<div id="agendar"></div>', unsafe_allow_html=True)
+    # Se veio link com view, força a aba correta
+    if view == "agendar":
+        st.session_state["nd_tab"] = "📅 Agendamento"
+    elif view == "catalogo":
+        st.session_state["nd_tab"] = "📒 Catálogo"
+
+    if "nd_tab" not in st.session_state:
+        st.session_state["nd_tab"] = "📅 Agendamento"
+
+    tab = st.radio(
+        "Navegação",
+        ["📅 Agendamento", "📒 Catálogo"],
+        horizontal=True,
+        label_visibility="collapsed",
+        key="nd_tab",
+    )
+
+    if tab == "📅 Agendamento":
         st.subheader("Agendar")
 
         nome = st.text_input("Seu nome")
@@ -2113,7 +2133,7 @@ def tela_publica():
                             st.success("Reserva criada como **PENDENTE**. Clique em **Abrir WhatsApp** para enviar a mensagem.")
                             st.rerun()
 
-    with aba_catalogo:
+    else:
         st.subheader("📒 Catálogo")
 
         if not catalog["enabled"]:
