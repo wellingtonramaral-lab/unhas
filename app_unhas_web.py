@@ -66,6 +66,16 @@ except Exception:
 # STREAMLIT CONFIG + THEME (Agenda-Pro)
 # ============================================================
 st.set_page_config(
+    st.markdown("""
+    <style>
+    /* Esconde barra superior do Streamlit */
+    header {visibility: hidden;}
+    /* Esconde menu hambúrguer */
+    #MainMenu {visibility: hidden;}
+    /* Esconde rodapé */
+    footer {visibility: hidden;}
+    </style>
+    """, unsafe_allow_html=True)
     page_title="Agenda-Pro",
     page_icon="📅",
     layout="wide",
