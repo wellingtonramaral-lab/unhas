@@ -3090,3 +3090,164 @@ st.markdown("""
 .nd-avatar-img{ max-width: 190px !important; max-height: 190px !important; }
 </style>
 """, unsafe_allow_html=True)
+
+
+
+# ===============================
+# V8 — Premium hero center + animated ring around avatar + responsive CTA
+# ===============================
+st.markdown("""
+<style>
+/* --- HERO: center everything in one aligned block --- */
+.nd-hero{
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  justify-content: center !important;
+  text-align: center !important;
+  margin-top: 0.4rem !important;
+  margin-bottom: 1.1rem !important;
+}
+
+.nd-name{
+  font-size: clamp(1.45rem, 3.8vw, 2.2rem) !important;
+  font-weight: 900 !important;
+  letter-spacing: .2px !important;
+  margin-top: 10px !important;
+  margin-bottom: 6px !important;
+}
+
+.nd-bio{
+  color: rgba(255,255,255,.74) !important;
+  font-size: 0.98rem !important;
+  margin-bottom: 18px !important;
+}
+
+/* badges centered */
+.nd-badges{
+  display: flex !important;
+  flex-wrap: wrap !important;
+  justify-content: center !important;
+  gap: 10px !important;
+  margin-top: 2px !important;
+  margin-bottom: 26px !important;
+}
+.nd-badge{
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+  padding: 10px 12px !important;
+  border-radius: 999px !important;
+  border: 1px solid rgba(255,255,255,.14) !important;
+  background: rgba(255,255,255,.04) !important;
+  color: rgba(255,255,255,.86) !important;
+  font-size: 0.92rem !important;
+}
+
+/* --- AVATAR: animated ring around the photo (no more big standalone orb) --- */
+.nd-avatar-wrap{
+  position: relative !important;
+  width: clamp(120px, 32vw, 170px) !important;
+  height: clamp(120px, 32vw, 170px) !important;
+  max-width: 170px !important;
+  max-height: 170px !important;
+  margin: 0 auto 12px auto !important;
+  padding: 0 !important;
+  border-radius: 999px !important;
+  background: transparent !important;
+  animation: none !important; /* ring spins, not the whole circle */
+}
+
+/* outer glow */
+.nd-avatar-wrap::after{
+  content: "";
+  position: absolute;
+  inset: -14px;
+  border-radius: 999px;
+  background: conic-gradient(from 180deg,
+      rgba(255,77,166,.85),
+      rgba(56,189,248,.80),
+      rgba(34,197,94,.72),
+      rgba(255,77,166,.85));
+  filter: blur(18px);
+  opacity: .22;
+  z-index: 0;
+  pointer-events: none;
+}
+
+/* spinning ring */
+.nd-avatar-wrap::before{
+  content: "";
+  position: absolute;
+  inset: -6px;
+  border-radius: 999px;
+  background: conic-gradient(from 180deg,
+      rgba(255,77,166,.98),
+      rgba(56,189,248,.92),
+      rgba(34,197,94,.84),
+      rgba(255,77,166,.98));
+  animation: ndSpin 7s linear infinite;
+  z-index: 1;
+  pointer-events: none;
+}
+
+/* inner circle (the actual photo area) */
+.nd-avatar-inner{
+  position: relative !important;
+  z-index: 2 !important;
+  width: 100% !important;
+  height: 100% !important;
+  border-radius: 999px !important;
+  overflow: hidden !important;
+  padding: 6px !important; /* thickness of the ring */
+  background: rgba(7, 11, 18, 0.88) !important;
+  border: 1px solid rgba(255,255,255,.10) !important;
+  box-shadow: 0 16px 40px rgba(0,0,0,.38) !important;
+  box-sizing: border-box !important;
+}
+
+.nd-avatar-img{
+  width: 100% !important;
+  height: 100% !important;
+  border-radius: 999px !important;
+  object-fit: cover !important;
+  display: block !important;
+  max-width: 100% !important;
+  max-height: 100% !important;
+}
+
+.nd-avatar-fallback{
+  width: 100% !important;
+  height: 100% !important;
+  border-radius: 999px !important;
+  display:flex !important;
+  align-items:center !important;
+  justify-content:center !important;
+  font-weight: 900 !important;
+  letter-spacing: 1px !important;
+  color: rgba(255,255,255,.92) !important;
+  background: rgba(255,255,255,.06) !important;
+}
+
+/* --- FIXED CTA: responsive (desktop = narrower, mobile = full) --- */
+.nd-fixed-cta{
+  padding: 12px 14px !important;
+}
+.nd-fixed-cta a{
+  width: min(720px, calc(100% - 0px)) !important;
+  margin: 0 auto !important;
+  padding: 16px 16px !important;
+  border-radius: 18px !important;
+  box-shadow: 0 10px 28px rgba(255, 77, 166, 0.35) !important;
+  font-size: 16.5px !important;
+}
+@media (min-width: 900px){
+  .nd-fixed-cta a{
+    width: min(560px, 100%) !important;
+    padding: 14px 18px !important;
+    font-size: 16px !important;
+    border-radius: 16px !important;
+  }
+}
+</style>
+""", unsafe_allow_html=True)
