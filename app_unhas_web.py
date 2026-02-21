@@ -2035,7 +2035,7 @@ def tela_publica():
 
     if avatar_url:
         st.markdown('<div class="nd-avatar-wrap"><div class="nd-avatar-inner">', unsafe_allow_html=True)
-        st.markdown(f'<img class="nd-avatar-img" src="{avatar_url}" alt="foto" />', unsafe_allow_html=True)
+        st.markdown(f'<img class="nd-avatar-img" src="{avatar_url}" alt="foto" style="width:100%;height:100%;max-width:190px;max-height:190px;object-fit:cover;border-radius:999px;display:block;" />', unsafe_allow_html=True)
         st.markdown('</div></div>', unsafe_allow_html=True)
     else:
         st.markdown('<div class="nd-avatar-wrap"><div class="nd-avatar-inner">', unsafe_allow_html=True)
@@ -3075,5 +3075,18 @@ st.markdown("""
   to { transform: rotate(360deg); }
 }
 
+</style>
+""", unsafe_allow_html=True)
+
+
+# ===============================
+# V7 HARD CLAMP
+# ===============================
+
+st.markdown("""
+<style>
+/* V7 hard clamp (extra safety on some Streamlit builds) */
+.nd-avatar-wrap{ max-width: 190px !important; max-height: 190px !important; }
+.nd-avatar-img{ max-width: 190px !important; max-height: 190px !important; }
 </style>
 """, unsafe_allow_html=True)
