@@ -2020,7 +2020,16 @@ def tela_publica():
     if not avatar_url:
         avatar_url = str(tenant.get("avatar_url") or tenant.get("profile_photo_url") or "").strip()
 
-    # iniciais
+    
+    # V10: Hide any duplicate renders of the same avatar image (Streamlit sometimes duplicates images)
+    if avatar_url:
+        st.markdown(f"""
+        <style>
+        /* hide any <img> using the same src that is NOT our premium avatar */
+        img[src="{avatar_url}"]:not(.nd-avatar-img){{display:none !important;}}
+        </style>
+        """, unsafe_allow_html=True)
+# iniciais
     def _iniciais(nome: str) -> str:
         parts = [p for p in re.split(r"\s+", (nome or "").strip()) if p]
         if not parts:
