@@ -3012,8 +3012,10 @@ st.markdown("""
 
 /* Avatar com anel gradiente animado */
 .nd-avatar-wrap{
-  width: 176px;
-  height: 176px;
+  width: clamp(120px, 32vw, 190px) !important;
+  height: clamp(120px, 32vw, 190px) !important;
+  max-width: 190px !important;
+  max-height: 190px !important;
   border-radius: 999px;
   padding: 4px;
   margin: 0 auto 14px auto;
@@ -3024,7 +3026,7 @@ st.markdown("""
 
 .nd-avatar-inner{
   width: 100%;
-  height: 100%;
+  height: 100% !important;
   border-radius: 999px;
   overflow: hidden;
   background: rgba(255,255,255,.06);
@@ -3035,8 +3037,8 @@ st.markdown("""
 }
 
 .nd-avatar-img{
-  width: 100%;
-  height: 100%;
+  width: 100% !important;
+  height: 100% !important;
   object-fit: cover;
   border-radius: 999px;
   display:block;
