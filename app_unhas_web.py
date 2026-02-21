@@ -1385,7 +1385,7 @@ def montar_mensagem_pagamento_cliente(
     deposit_cfg: dict | None = None,
 ):
     """
-    Versão SEM emojis para evitar caracteres quebrados (�) no WhatsApp.
+    Versão SEM emojis para evitar caracteres quebrados ( ) no WhatsApp.
     """
     deposit_cfg = deposit_cfg or {"enabled": True, "value": float(valor_sinal)}
     deposit_on = bool(deposit_cfg.get("enabled", True)) and float(valor_sinal or 0) > 0
@@ -1814,12 +1814,112 @@ def tela_publica():
 
     nome_raw = (tenant.get("nome") or "").strip()
     if not nome_raw or nome_raw.lower() in ("minha loja", "minha agenda"):
-        nome_prof = "Profissional"
+        nome_prof = "Nail Designer"
     else:
         nome_prof = nome_raw
 
-    st.markdown(f"##            **{nome_prof}**")
-    st.caption("Escolha o serviço, o dia e o horário disponível.")
+    # ========= Visual (Nail Designer vibes) =========
+    st.markdown(
+        """
+        <style>
+        .nd-hero{
+          text-align:center;
+          margin-top: 0.2rem;
+          margin-bottom: 0.9rem;
+        }
+        .nd-avatar{
+          width: 132px;
+          height: 132px;
+          border-radius: 999px;
+          object-fit: cover;
+          border: 3px solid rgba(255,255,255,.14);
+          box-shadow: 0 14px 35px rgba(0,0,0,.35);
+          display:block;
+          margin: 0 auto 12px auto;
+          background: rgba(255,255,255,.06);
+        }
+        .nd-avatar-fallback{
+          width: 132px;
+          height: 132px;
+          border-radius: 999px;
+          display:flex;
+          align-items:center;
+          justify-content:center;
+          margin: 0 auto 12px auto;
+          border: 3px solid rgba(255,255,255,.14);
+          box-shadow: 0 14px 35px rgba(0,0,0,.35);
+          background: radial-gradient(100px 60px at 30% 20%, rgba(255,77,166,.22), transparent 60%),
+                      radial-gradient(120px 70px at 75% 30%, rgba(56,189,248,.18), transparent 62%),
+                      rgba(255,255,255,.05);
+          font-weight: 900;
+          font-size: 2.1rem;
+          letter-spacing: .5px;
+          color: rgba(255,255,255,.92);
+        }
+        .nd-name{
+          font-size: 2.0rem;
+          font-weight: 900;
+          line-height: 1.1;
+          margin: 0;
+        }
+        .nd-bio{
+          color: rgba(255,255,255,.74);
+          margin-top: .35rem;
+          margin-bottom: .55rem;
+          font-size: 1.02rem;
+        }
+        .nd-badges{
+          display:flex;
+          gap: 10px;
+          justify-content:center;
+          flex-wrap: wrap;
+          margin-top: .3rem;
+        }
+        .nd-badge{
+          display:inline-flex;
+          align-items:center;
+          gap: 8px;
+          padding: 7px 11px;
+          border-radius: 999px;
+          border: 1px solid rgba(255,255,255,.12);
+          background: rgba(255,255,255,.04);
+          color: rgba(255,255,255,.75);
+          font-size: .92rem;
+        }
+        .nd-fixed-cta{
+          position: fixed;
+          left: 14px;
+          right: 14px;
+          bottom: 14px;
+          z-index: 99999;
+        }
+        .nd-fixed-cta a{
+          display:block;
+          text-align:center;
+          padding: 14px 16px;
+          border-radius: 16px;
+          text-decoration:none;
+          font-weight: 900;
+          letter-spacing: .2px;
+          color: rgba(255,255,255,.95);
+          border: 1px solid rgba(255,255,255,.18);
+          background: linear-gradient(90deg, rgba(255,77,166,.55), rgba(255,102,204,.35), rgba(56,189,248,.25));
+          box-shadow: 0 16px 35px rgba(0,0,0,.45);
+          backdrop-filter: blur(10px);
+        }
+        .nd-fixed-cta a:hover{
+          transform: translateY(-1px);
+          border-color: rgba(255,255,255,.28);
+        }
+        .nd-grid-caption{
+          margin-top: .4rem;
+          color: rgba(255,255,255,.70);
+          font-size: .95rem;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
 
     if not tenant.get("pode_operar", False):
         st.error("🔒 Agenda indisponível (assinatura vencida ou conta inativa).")
@@ -1840,9 +1940,75 @@ def tela_publica():
     catalog = settings_get_catalog(settings)
     deposit_cfg = settings_get_deposit(settings)
 
+    # Dados de branding (opcionais, não quebram se não existir)
+    bio = ""
+    city = ""
+    avatar_url = ""
+
+    if isinstance(settings, dict):
+        bio = str(settings.get("bio") or settings.get("descricao") or "").strip()
+        city = str(settings.get("cidade") or settings.get("city") or "").strip()
+        avatar_url = str(
+            settings.get("avatar_url")
+            or settings.get("profile_photo_url")
+            or (settings.get("branding") or {}).get("avatar_url", "")
+        ).strip()
+
+    # fallback: tenta pegar de campos diretos do tenant (caso você adicione no backend)
+    if not avatar_url:
+        avatar_url = str(tenant.get("avatar_url") or tenant.get("profile_photo_url") or "").strip()
+
+    # iniciais
+    def _iniciais(nome: str) -> str:
+        parts = [p for p in re.split(r"\s+", (nome or "").strip()) if p]
+        if not parts:
+            return "ND"
+        if len(parts) == 1:
+            return parts[0][:2].upper()
+        return (parts[0][:1] + parts[-1][:1]).upper()
+
+    initials = _iniciais(nome_prof)
+
+    st.markdown('<div class="nd-hero">', unsafe_allow_html=True)
+
+    if avatar_url:
+        st.markdown(f'<img class="nd-avatar" src="{avatar_url}" alt="foto" />', unsafe_allow_html=True)
+    else:
+        st.markdown(f'<div class="nd-avatar-fallback">{initials}</div>', unsafe_allow_html=True)
+
+    st.markdown(f'<div class="nd-name">{nome_prof}</div>', unsafe_allow_html=True)
+
+    if bio:
+        st.markdown(f'<div class="nd-bio">{bio}</div>', unsafe_allow_html=True)
+    else:
+        st.markdown('<div class="nd-bio">✨ Alongamento • Manicure • Nail Art</div>', unsafe_allow_html=True)
+
+    badges = []
+    if city:
+        badges.append(f"📍 {city}")
+    badges.append("💬 Atendimento via WhatsApp")
+    if deposit_cfg.get("enabled", True) and float(deposit_cfg.get("value", 0) or 0) > 0:
+        badges.append("💰 Sinal via Pix")
+
+    st.markdown('<div class="nd-badges">', unsafe_allow_html=True)
+    for b in badges[:3]:
+        st.markdown(f'<span class="nd-badge">{b}</span>', unsafe_allow_html=True)
+    st.markdown('</div></div>', unsafe_allow_html=True)
+
+    # Botão fixo para converter mais (scroll para área de agendamento)
+    st.markdown(
+        """
+        <div class="nd-fixed-cta">
+          <a href="#agendar">💅 Agendar agora</a>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
     aba_agendar, aba_catalogo = st.tabs(["📅 Agendamento", "📒 Catálogo"])
 
     with aba_agendar:
+        st.markdown('<div id="agendar"></div>', unsafe_allow_html=True)
         st.subheader("Agendar")
 
         nome = st.text_input("Seu nome")
@@ -1949,15 +2115,20 @@ def tela_publica():
 
     with aba_catalogo:
         st.subheader("📒 Catálogo")
+
         if not catalog["enabled"]:
             st.info("Catálogo indisponível.")
-        elif not catalog["items"]:
-            st.info("Este profissional ainda não adicionou arquivos no catálogo.")
-        else:
-            for i, it in enumerate(catalog["items"], start=1):
+            return
+
+        if not catalog["items"]:
+            st.info("Este profissional ainda não adicionou fotos no catálogo.")
+            return
+
+        # Grid 2 colunas tipo feed
+        cols = st.columns(2)
+        for i, it in enumerate(catalog["items"]):
+            with cols[i % 2]:
                 caption = (it.get("caption") or "").strip()
-                if caption:
-                    st.markdown(f"**{caption}**")
 
                 if it.get("type") == "pdf":
                     st.markdown("📄 **PDF**")
@@ -1965,8 +2136,8 @@ def tela_publica():
                 else:
                     st.image(it["url"], use_container_width=True)
 
-                if i < len(catalog["items"]):
-                    st.divider()
+                if caption:
+                    st.markdown(f'<div class="nd-grid-caption">{caption}</div>', unsafe_allow_html=True)
 
 # ============================================================
 # ONBOARDING (primeiro acesso)
