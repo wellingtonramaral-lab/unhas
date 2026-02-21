@@ -2864,3 +2864,54 @@ elif IS_PUBLIC:
     tela_publica()
 else:
     tela_admin()
+
+
+
+# ===============================
+# V4 PREMIUM UI ENHANCEMENTS
+# ===============================
+
+st.markdown("""
+<style>
+
+/* Extra spacing for luxury feel */
+.nd-hero h1 {
+    margin-top: 18px !important;
+    margin-bottom: 10px !important;
+}
+
+.nd-hero p {
+    margin-bottom: 18px !important;
+}
+
+.nd-badges {
+    margin-top: 14px !important;
+    margin-bottom: 26px !important;
+}
+
+/* Bigger avatar */
+.nd-avatar {
+    width: 170px !important;
+    height: 170px !important;
+    border-radius: 50%;
+    border: 3px solid rgba(255,255,255,.18);
+    box-shadow: 0 0 25px rgba(255, 77, 166, 0.15);
+}
+
+/* Premium fixed CTA */
+.nd-fixed-cta a {
+    padding: 18px !important;
+    font-size: 17px !important;
+    font-weight: 700 !important;
+    border-radius: 18px !important;
+    box-shadow: 0 8px 25px rgba(255, 77, 166, 0.35);
+    transition: all 0.25s ease-in-out;
+}
+
+.nd-fixed-cta a:hover {
+    transform: translateY(-3px) scale(1.01);
+    box-shadow: 0 12px 35px rgba(255, 77, 166, 0.5);
+}
+
+</style>
+""", unsafe_allow_html=True)
