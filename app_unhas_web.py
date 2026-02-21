@@ -1999,7 +1999,7 @@ def tela_publica():
     st.markdown(
         f"""
         <div class="nd-fixed-cta">
-          <a href="?t={PUBLIC_TENANT_ID}&view=agendar">💅 Agendar agora</a>
+          <a href="?t={PUBLIC_TENANT_ID}&view=agendar" target="_self">💅 Agendar agora</a>
         </div>
         """,
         unsafe_allow_html=True,
