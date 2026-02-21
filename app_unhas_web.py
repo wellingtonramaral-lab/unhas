@@ -99,6 +99,14 @@ div[data-testid="stDecoration"] {
 </style>
 """, unsafe_allow_html=True)
 
+st.markdown("""
+<style>
+div[class*="viewerBadge_container"] {
+    display: none !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
 def apply_theme():
     st.markdown(
         """
@@ -169,8 +177,8 @@ def apply_theme():
         }
         .stButton > button:hover, .stDownloadButton > button:hover, .stLinkButton > a:hover{
             transform: translateY(-1px);
-            border-color: rgba(56,189,248,.55) !important;
-            background: rgba(56,189,248,.10) !important;
+            border-color: rgba(56, 189, 248, .55) !important;
+            background: rgba(56, 189, 248, .10) !important;
         }
 
         div[data-testid="stMetric"]{
