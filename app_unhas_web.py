@@ -75,9 +75,27 @@ st.set_page_config(
 
 st.markdown("""
 <style>
+
+/* Esconde barra superior */
 header {visibility: hidden;}
+
+/* Esconde menu hambúrguer */
 #MainMenu {visibility: hidden;}
+
+/* Esconde rodapé padrão */
 footer {visibility: hidden;}
+
+/* Esconde botão "Manage app" do Streamlit Cloud */
+a[href*="streamlit.io"],
+div[data-testid="stDecoration"] {
+    display: none !important;
+}
+
+/* Remove margem extra inferior */
+.block-container {
+    padding-bottom: 0rem !important;
+}
+
 </style>
 """, unsafe_allow_html=True)
 
