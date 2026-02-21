@@ -76,22 +76,26 @@ st.set_page_config(
 st.markdown("""
 <style>
 
-/* Esconde barra superior */
+/* Esconde header */
 header {visibility: hidden;}
 
-/* Esconde menu hambúrguer */
+/* Esconde menu */
 #MainMenu {visibility: hidden;}
 
 /* Esconde rodapé padrão */
 footer {visibility: hidden;}
 
-/* Esconde botão "Manage app" do Streamlit Cloud */
-a[href*="streamlit.io"],
-div[data-testid="stDecoration"] {
+/* Esconde badge "Built with Streamlit" */
+div[data-testid="stStatusWidget"] {
     display: none !important;
 }
 
-/* Remove margem extra inferior */
+/* Esconde container inferior do Streamlit Cloud */
+.viewerBadge_container__1QSob {
+    display: none !important;
+}
+
+/* Remove espaço inferior */
 .block-container {
     padding-bottom: 0rem !important;
 }
