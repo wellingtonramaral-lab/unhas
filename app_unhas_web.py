@@ -1,4 +1,5 @@
 import streamlit as st
+import streamlit.components.v1 as components
 import pandas as pd
 from datetime import date, datetime, timedelta, timezone
 import urllib.parse
@@ -527,6 +528,7 @@ IS_PUBLIC = bool(PUBLIC_TENANT_ID)
 # ============================================================
 import requests
 import streamlit as st
+import streamlit.components.v1 as components
 
 def tela_reset_senha():
     st.markdown("## 🔐 Redefinir senha")
@@ -2041,6 +2043,34 @@ def tela_publica():
     initials = _iniciais(nome_prof)
 
     st.markdown('<div class="nd-hero">', unsafe_allow_html=True)
+
+# V11: Remove any duplicated huge avatar images injected by Streamlit (runtime DOM fix)
+components.html("""
+<script>
+(function(){
+  function cleanup(){
+    try{
+      const keep = document.querySelector('img.nd-avatar-img');
+      const imgs = Array.from(document.querySelectorAll('img'));
+      imgs.forEach(img=>{
+        if(keep && img === keep) return;
+        const r = img.getBoundingClientRect();
+        // only affect very top of page, and only huge images
+        if(r.top < 650 && r.width > 260 && r.height > 260){
+          img.style.display = 'none';
+        }
+      });
+    }catch(e){}
+  }
+  // run multiple times to survive rerenders
+  cleanup();
+  setTimeout(cleanup, 250);
+  setTimeout(cleanup, 800);
+  setTimeout(cleanup, 1500);
+})();
+</script>
+""", height=0)
+
 
     if avatar_url:
         st.markdown('<div class="nd-avatar-wrap"><div class="nd-avatar-inner">', unsafe_allow_html=True)
