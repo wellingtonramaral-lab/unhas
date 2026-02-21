@@ -1526,8 +1526,15 @@ def menu_topo_comandos(access_token: str, tenant_id: str):
             avatar_cur = str(settings_here.get("avatar_url") or settings_here.get("profile_photo_url") or "").strip()
 
             st.markdown("#### 📷 Foto do perfil")
+
             if avatar_cur:
-                st.image(avatar_cur, width=120)
+                st.markdown(f"""
+                <div class="nd-avatar-wrap">
+                    <div class="nd-avatar-inner">
+                        <img class="nd-avatar-img" src="{avatar_cur}">
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
                 st.caption("Dica: use uma foto bem nítida do rosto (melhora a conversão).")
 
             up_avatar = st.file_uploader(
