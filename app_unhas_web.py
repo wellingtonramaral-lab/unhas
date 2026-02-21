@@ -105,7 +105,7 @@ div[data-testid="stStatusWidget"] {
 
 st.markdown("""
 <style>
-div[class*="viewerBadge_container"] {
+iframe {
     display: none !important;
 }
 </style>
