@@ -1519,6 +1519,68 @@ def menu_topo_comandos(access_token: str, tenant_id: str):
                 st.error("Não foi possível carregar seu perfil.")
                 return
 
+            # Foto do perfil (salva em tenants.settings['avatar_url'])
+            settings_here = get_tenant_settings_admin(access_token, tenant_id) or {}
+            avatar_cur = str(settings_here.get("avatar_url") or settings_here.get("profile_photo_url") or "").strip()
+
+            st.markdown("#### 📷 Foto do perfil")
+            if avatar_cur:
+                st.image(avatar_cur, width=120)
+                st.caption("Dica: use uma foto bem nítida do rosto (melhora a conversão).")
+
+            up_avatar = st.file_uploader(
+                "Enviar/atualizar foto (JPG/PNG/WEBP)",
+                type=["jpg", "jpeg", "png", "webp"],
+                accept_multiple_files=False,
+                key="avatar_upload",
+                label_visibility="collapsed",
+            )
+
+            def upload_profile_photo(access_token: str, tenant_id: str, uploaded_file):
+                """Upload da foto do perfil no Supabase Storage (mesmo bucket do catálogo)."""
+                try:
+                    ts = datetime.now().strftime("%Y%m%d%H%M%S")
+                    safe_name = sanitize_filename(uploaded_file.name or "avatar.jpg")
+                    path = f"{tenant_id}/profile/{ts}_{safe_name}"
+                    content_type = guess_content_type(safe_name)
+                    file_bytes = uploaded_file.getvalue()
+
+                    url = f"{SUPABASE_URL}/storage/v1/object/{CATALOGO_BUCKET}/{path}"
+                    headers = {
+                        "Authorization": f"Bearer {access_token}",
+                        "apikey": SUPABASE_ANON_KEY,
+                        "Content-Type": str(content_type),
+                    }
+                    resp = requests.put(url, headers=headers, data=file_bytes, timeout=30)
+                    if resp.status_code not in (200, 201):
+                        try:
+                            return False, str(resp.json()), ""
+                        except Exception:
+                            return False, f"HTTP {resp.status_code}: {resp.text}", ""
+
+                    public_url = f"{SUPABASE_URL}/storage/v1/object/public/{CATALOGO_BUCKET}/{path}"
+                    return True, "", public_url
+                except Exception as e:
+                    return False, str(e), ""
+
+            if up_avatar:
+                if st.button("💾 Salvar foto do perfil", use_container_width=True, type="primary"):
+                    okp, msgp, urlp = upload_profile_photo(access_token, tenant_id, up_avatar)
+                    if okp and urlp:
+                        settings_here["avatar_url"] = urlp
+                        ok_save, err_save = save_tenant_settings_admin(access_token, tenant_id, settings_here)
+                        if ok_save:
+                            st.success("✅ Foto atualizada!")
+                            st.rerun()
+                        else:
+                            st.error("Enviei a foto, mas não consegui salvar no banco.")
+                            st.code(err_save)
+                    else:
+                        st.error("Não consegui enviar a foto.")
+                        st.code(msgp)
+
+            st.divider()
+
             nome = st.text_input("Nome da loja", value=profile.get("nome") or "")
             whatsapp = st.text_input("WhatsApp (somente números)", value=profile.get("whatsapp") or "")
             pix_chave = st.text_input("Chave Pix", value=profile.get("pix_chave") or "")
@@ -1972,9 +2034,13 @@ def tela_publica():
     st.markdown('<div class="nd-hero">', unsafe_allow_html=True)
 
     if avatar_url:
-        st.markdown(f'<img class="nd-avatar" src="{avatar_url}" alt="foto" />', unsafe_allow_html=True)
+        st.markdown('<div class="nd-avatar-wrap"><div class="nd-avatar-inner">', unsafe_allow_html=True)
+        st.markdown(f'<img class="nd-avatar-img" src="{avatar_url}" alt="foto" />', unsafe_allow_html=True)
+        st.markdown('</div></div>', unsafe_allow_html=True)
     else:
+        st.markdown('<div class="nd-avatar-wrap"><div class="nd-avatar-inner">', unsafe_allow_html=True)
         st.markdown(f'<div class="nd-avatar-fallback">{initials}</div>', unsafe_allow_html=True)
+        st.markdown('</div></div>', unsafe_allow_html=True)
 
     st.markdown(f'<div class="nd-name">{nome_prof}</div>', unsafe_allow_html=True)
 
@@ -2848,7 +2914,7 @@ def tela_admin():
     # ===== Rodapé fixo "Sair" (sempre no final da tela) =====
     st.markdown("""
     <div class="footer-logout">
-      <a href="?logout=1">🚪 Sair</a>
+      <a href="\1" target="_self">🚪 Sair</a>
     </div>
     """, unsafe_allow_html=True)
 
@@ -2911,6 +2977,100 @@ st.markdown("""
 .nd-fixed-cta a:hover {
     transform: translateY(-3px) scale(1.01);
     box-shadow: 0 12px 35px rgba(255, 77, 166, 0.5);
+}
+
+</style>
+""", unsafe_allow_html=True)
+
+
+
+# ===============================
+# V5: AVATAR ANIMADO + TIPOGRAFIA PREMIUM
+# ===============================
+st.markdown("""
+<style>
+
+/* Tipografia mais premium */
+.stApp, .stApp * {
+  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji" !important;
+}
+
+.nd-name{
+  letter-spacing: .2px;
+}
+
+.nd-bio{
+  margin-top: 10px !important;
+  margin-bottom: 18px !important;
+  line-height: 1.35 !important;
+}
+
+.nd-badges{
+  margin-top: 14px !important;
+  margin-bottom: 28px !important;
+}
+
+/* Avatar com anel gradiente animado */
+.nd-avatar-wrap{
+  width: 176px;
+  height: 176px;
+  border-radius: 999px;
+  padding: 4px;
+  margin: 0 auto 14px auto;
+  background: conic-gradient(from 180deg, rgba(255,77,166,.95), rgba(56,189,248,.92), rgba(34,197,94,.88), rgba(255,77,166,.95));
+  animation: ndSpin 7s linear infinite;
+  box-shadow: 0 18px 45px rgba(0,0,0,.35);
+}
+
+.nd-avatar-inner{
+  width: 100%;
+  height: 100%;
+  border-radius: 999px;
+  overflow: hidden;
+  background: rgba(255,255,255,.06);
+  border: 1px solid rgba(255,255,255,.14);
+  display:flex;
+  align-items:center;
+  justify-content:center;
+}
+
+.nd-avatar-img{
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 999px;
+  display:block;
+}
+
+/* fallback dentro do inner */
+.nd-avatar-fallback{
+  width: 100% !important;
+  height: 100% !important;
+  margin: 0 !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  background: radial-gradient(120px 80px at 30% 20%, rgba(255,77,166,.22), transparent 60%),
+              radial-gradient(160px 90px at 75% 30%, rgba(56,189,248,.18), transparent 62%),
+              rgba(255,255,255,.05) !important;
+}
+
+/* Botão fixo ainda mais premium (micro animação suave) */
+.nd-fixed-cta a{
+  padding: 18px !important;
+  font-size: 17px !important;
+  border-radius: 18px !important;
+  box-shadow: 0 10px 28px rgba(255, 77, 166, 0.38);
+  transition: transform 0.22s ease, box-shadow 0.22s ease, filter 0.22s ease;
+}
+
+.nd-fixed-cta a:active{
+  transform: translateY(0px) scale(0.99);
+  filter: brightness(1.05);
+}
+
+@keyframes ndSpin{
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 
 </style>
