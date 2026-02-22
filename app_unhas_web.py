@@ -2005,79 +2005,100 @@ def tela_publica():
     deposit_cfg = settings_get_deposit(settings)
 
     # Dados de branding (opcionais, não quebram se não existir)
-bio = ""
-city = ""
-avatar_url = ""
+    bio = ""
+    city = ""
+    avatar_url = ""
 
-if isinstance(settings, dict):
-    bio = str(settings.get("bio") or settings.get("descricao") or "").strip()
-    city = str(settings.get("cidade") or settings.get("city") or "").strip()
-    avatar_url = str(
-        settings.get("avatar_url")
-        or settings.get("profile_photo_url")
-        or (settings.get("branding") or {}).get("avatar_url", "")
-    ).strip()
+    if isinstance(settings, dict):
+        bio = str(settings.get("bio") or settings.get("descricao") or "").strip()
+        city = str(settings.get("cidade") or settings.get("city") or "").strip()
+        avatar_url = str(
+            settings.get("avatar_url")
+            or settings.get("profile_photo_url")
+            or (settings.get("branding") or {}).get("avatar_url", "")
+        ).strip()
 
-# fallback: tenta pegar de campos diretos do tenant (caso você adicione no backend)
-if not avatar_url:
-    avatar_url = str(tenant.get("avatar_url") or tenant.get("profile_photo_url") or "").strip()
+    # fallback: tenta pegar de campos diretos do tenant (caso você adicione no backend)
+    if not avatar_url:
+        avatar_url = str(tenant.get("avatar_url") or tenant.get("profile_photo_url") or "").strip()
 
-def _iniciais(nome: str) -> str:
-    parts = [p for p in re.split(r"\s+", (nome or "").strip()) if p]
-    if not parts:
-        return "ND"
-    if len(parts) == 1:
-        return parts[0][:2].upper()
-    return (parts[0][:1] + parts[-1][:1]).upper()
+    
+    # V10: Hide any duplicate renders of the same avatar image (Streamlit sometimes duplicates images)
+    if avatar_url:
+        st.markdown(f"""
+        <style>
+        /* hide any <img> using the same src that is NOT our premium avatar */
+        img[src="{avatar_url}"]:not(.nd-avatar-img){{display:none !important;}}
+        </style>
+        """, unsafe_allow_html=True)
+# iniciais
+    def _iniciais(nome: str) -> str:
+        parts = [p for p in re.split(r"\s+", (nome or "").strip()) if p]
+        if not parts:
+            return "ND"
+        if len(parts) == 1:
+            return parts[0][:2].upper()
+        return (parts[0][:1] + parts[-1][:1]).upper()
 
-initials = _iniciais(nome_prof)
+    initials = _iniciais(nome_prof)
 
-# HERO premium (centralizado)
-st.markdown('<div class="nd-hero">', unsafe_allow_html=True)
+    st.markdown('<div class="nd-hero">', unsafe_allow_html=True)
 
-# Avatar (apenas UMA renderização — sem st.image)
-if avatar_url:
-    st.markdown(
-        f'''
-        <div class="nd-avatar-wrap">
-          <div class="nd-avatar-inner">
-            <img class="nd-avatar-img" src="{avatar_url}" alt="Foto do perfil">
-          </div>
-        </div>
-        ''',
-        unsafe_allow_html=True,
-    )
-else:
-    st.markdown(
-        f'''
-        <div class="nd-avatar-wrap">
-          <div class="nd-avatar-inner">
-            <div class="nd-avatar-fallback">{initials}</div>
-          </div>
-        </div>
-        ''',
-        unsafe_allow_html=True,
-    )
+    # V13: Remove any duplicated huge avatar images injected by Streamlit (runtime DOM fix)
+    components.html("""
+    <script>
+    (function(){
+      function cleanup(){
+        try{
+          const keep = document.querySelector("img.nd-avatar-img");
+          const imgs = Array.from(document.querySelectorAll("img"));
+          imgs.forEach(img=>{
+            if(keep && img === keep) return;
+            const r = img.getBoundingClientRect();
+            // only affect very top of page, and only huge images
+            if(r.top < 700 && r.width > 260 && r.height > 260){
+              img.style.display = "none";
+            }
+          });
+        }catch(e){}
+      }
+      cleanup();
+      setTimeout(cleanup, 250);
+      setTimeout(cleanup, 800);
+      setTimeout(cleanup, 1600);
+    })();
+    </script>
+    """, height=0)
 
-st.markdown(f'<h1 class="nd-name">{nome_prof}</h1>', unsafe_allow_html=True)
 
-# bio padrão se não existir
-bio_show = bio or "✨ Alongamento • Manicure • Nail Art"
-st.markdown(f'<div class="nd-bio">{bio_show}</div>', unsafe_allow_html=True)
 
-# badges
-badges = []
-if whatsapp_num:
+
+    if avatar_url:
+        st.markdown('<div class="nd-avatar-wrap"><div class="nd-avatar-inner">', unsafe_allow_html=True)
+        st.markdown(f'<img class="nd-avatar-img" src="{avatar_url}" alt="foto" style="width:100%;height:100%;max-width:190px;max-height:190px;object-fit:cover;border-radius:999px;display:block;" />', unsafe_allow_html=True)
+        st.markdown('</div></div>', unsafe_allow_html=True)
+    else:
+        st.markdown('<div class="nd-avatar-wrap"><div class="nd-avatar-inner">', unsafe_allow_html=True)
+        st.markdown(f'<div class="nd-avatar-fallback">{initials}</div>', unsafe_allow_html=True)
+        st.markdown('</div></div>', unsafe_allow_html=True)
+
+    st.markdown(f'<div class="nd-name">{nome_prof}</div>', unsafe_allow_html=True)
+
+    if bio:
+        st.markdown(f'<div class="nd-bio">{bio}</div>', unsafe_allow_html=True)
+    else:
+        st.markdown('<div class="nd-bio">✨ Alongamento • Manicure • Nail Art</div>', unsafe_allow_html=True)
+
+    badges = []
+    if city:
+        badges.append(f"📍 {city}")
     badges.append("💬 Atendimento via WhatsApp")
-# sinal/pix só se estiver habilitado
-if bool(deposit_cfg.get("enabled", True)) and float(deposit_cfg.get("value", 0) or 0) > 0:
-    badges.append("💰 Sinal via Pix")
-if city:
-    badges.append(f"📍 {city}")
+    if deposit_cfg.get("enabled", True) and float(deposit_cfg.get("value", 0) or 0) > 0:
+        badges.append("💰 Sinal via Pix")
 
-st.markdown('<div class="nd-badges">', unsafe_allow_html=True)
-for b in badges:
-    st.markdown(f'<span class="nd-badge">{b}</span>', unsafe_allow_html=True)
+    st.markdown('<div class="nd-badges">', unsafe_allow_html=True)
+    for b in badges[:3]:
+        st.markdown(f'<span class="nd-badge">{b}</span>', unsafe_allow_html=True)
     st.markdown('</div></div>', unsafe_allow_html=True)
 
     # Botão fixo para converter mais (scroll para área de agendamento)
@@ -2272,9 +2293,10 @@ def tela_onboarding(access_token: str, tenant: dict):
     if settings_is_onboarding_done(settings):
         return True  # já concluído
 
-    st.markdown("## 🎉 Bem-vindo ao Agenda-Pro")
+    st.markdown("## 🎉 Bem-vindo ao Agenda‑Pro")
     st.caption("Vamos configurar o básico em menos de 2 minutos.")
 
+    # passo atual
     step = int(st.session_state.get("onboarding_step", 1))
     total_steps = 4
     st.progress(min(step, total_steps) / total_steps)
