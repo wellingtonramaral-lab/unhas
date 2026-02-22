@@ -2078,7 +2078,7 @@ if city:
 st.markdown('<div class="nd-badges">', unsafe_allow_html=True)
 for b in badges:
     st.markdown(f'<span class="nd-badge">{b}</span>', unsafe_allow_html=True)
-st.markdown('</div></div>', unsafe_allow_html=True)
+    st.markdown('</div></div>', unsafe_allow_html=True)
 
     # Botão fixo para converter mais (scroll para área de agendamento)
     st.markdown(
@@ -2272,10 +2272,9 @@ def tela_onboarding(access_token: str, tenant: dict):
     if settings_is_onboarding_done(settings):
         return True  # já concluído
 
-    st.markdown("## 🎉 Bem-vindo ao Agenda‑Pro")
+    st.markdown("## 🎉 Bem-vindo ao Agenda-Pro")
     st.caption("Vamos configurar o básico em menos de 2 minutos.")
 
-    # passo atual
     step = int(st.session_state.get("onboarding_step", 1))
     total_steps = 4
     st.progress(min(step, total_steps) / total_steps)
