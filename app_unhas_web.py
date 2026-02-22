@@ -1,4 +1,5 @@
 import streamlit as st
+import json
 import streamlit.components.v1 as components
 import pandas as pd
 from datetime import date, datetime, timedelta, timezone
@@ -66,6 +67,45 @@ except Exception:
 # ============================================================
 # STREAMLIT CONFIG + THEME (Agenda-Pro)
 # ============================================================
+
+# ============================================================
+# PERSISTÊNCIA DE LOGIN (evita desconectar ao atualizar a página)
+# Usa localStorage via streamlit_js_eval (dependência leve).
+# ============================================================
+def _js_get_local_token(key: str) -> str | None:
+    try:
+        from streamlit_js_eval import streamlit_js_eval
+        return streamlit_js_eval(
+            js_expressions=f"localStorage.getItem('{key}')",
+            want_output=True,
+            key=f"ls_get_{key}",
+        )
+    except Exception:
+        return None
+
+def _js_set_local_token(key: str, value: str):
+    try:
+        from streamlit_js_eval import streamlit_js_eval
+        safe = json.dumps(value)  # string com aspas/escape
+        streamlit_js_eval(
+            js_expressions=f"localStorage.setItem('{key}', {safe})",
+            want_output=False,
+            key=f"ls_set_{key}",
+        )
+    except Exception:
+        pass
+
+def _js_clear_local_token(key: str):
+    try:
+        from streamlit_js_eval import streamlit_js_eval
+        streamlit_js_eval(
+            js_expressions=f"localStorage.removeItem('{key}')",
+            want_output=False,
+            key=f"ls_del_{key}",
+        )
+    except Exception:
+        pass
+
 
 st.set_page_config(
     page_title="Agenda-Pro",
@@ -608,6 +648,12 @@ def tela_reset_senha():
 # ============================================================
 if "access_token" not in st.session_state:
     st.session_state.access_token = None
+# tenta restaurar token do navegador (F5 / refresh)
+if st.session_state.access_token is None:
+    _tok = _js_get_local_token("agenda_pro_access_token")
+    if _tok:
+        st.session_state.access_token = _tok
+
 if "wa_link" not in st.session_state:
     st.session_state.wa_link = None
 if "reservando" not in st.session_state:
@@ -643,6 +689,7 @@ def auth_login(email: str, password: str):
 
 def auth_logout():
     st.session_state.access_token = None
+    _js_clear_local_token("agenda_pro_access_token")
     st.rerun()
 
 def get_auth_user(access_token: str):
@@ -2548,6 +2595,7 @@ def tela_admin():
                         try:
                             res = auth_login(email, password)
                             st.session_state.access_token = res.session.access_token
+                            _js_set_local_token("agenda_pro_access_token", res.session.access_token)
                             st.rerun()
                         except Exception as e:
                             st.error("Falha no login.")
