@@ -1527,13 +1527,7 @@ def menu_topo_comandos(access_token: str, tenant_id: str):
 
             st.markdown("#### 📷 Foto do perfil")
             if avatar_cur:
-                st.markdown(f"""
-<div class="nd-avatar-wrap">
-    <div class="nd-avatar-inner">
-        <img class="nd-avatar-img" src="{avatar_cur}">
-    </div>
-</div>
-""", unsafe_allow_html=True)
+                st.image(avatar_cur, width=120)
                 st.caption("Dica: use uma foto bem nítida do rosto (melhora a conversão).")
 
             up_avatar = st.file_uploader(
@@ -2080,13 +2074,25 @@ def tela_publica():
 
 
     if avatar_url:
-        st.markdown('<div class="nd-avatar-wrap"><div class="nd-avatar-inner">', unsafe_allow_html=True)
-        st.markdown(f'<img class="nd-avatar-img" src="{avatar_url}" alt="foto" style="width:100%;height:100%;max-width:190px;max-height:190px;object-fit:cover;border-radius:999px;display:block;" />', unsafe_allow_html=True)
-        st.markdown('</div></div>', unsafe_allow_html=True)
+        st.markdown(f"""
+        <div class="nd-avatar-wrap" style="width:160px;height:160px;max-width:160px;max-height:160px;margin:0 auto 14px auto;position:relative;">
+          <div class="nd-avatar-ring" aria-hidden="true"></div>
+          <div class="nd-avatar-inner" style="width:100%;height:100%;border-radius:999px;overflow:hidden;position:relative;z-index:2;">
+            <img class="nd-avatar-img" src="{avatar_url}" alt="foto"
+                 style="width:100%;height:100%;object-fit:cover;border-radius:999px;display:block;" />
+          </div>
+        </div>
+        """, unsafe_allow_html=True)
     else:
-        st.markdown('<div class="nd-avatar-wrap"><div class="nd-avatar-inner">', unsafe_allow_html=True)
-        st.markdown(f'<div class="nd-avatar-fallback">{initials}</div>', unsafe_allow_html=True)
-        st.markdown('</div></div>', unsafe_allow_html=True)
+        st.markdown(f"""
+        <div class="nd-avatar-wrap" style="width:160px;height:160px;max-width:160px;max-height:160px;margin:0 auto 14px auto;position:relative;">
+          <div class="nd-avatar-ring" aria-hidden="true"></div>
+          <div class="nd-avatar-inner" style="width:100%;height:100%;border-radius:999px;overflow:hidden;position:relative;z-index:2;
+               display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,.06);">
+            <div class="nd-avatar-fallback" style="font-weight:900;font-size:40px;letter-spacing:1px;">{initials}</div>
+          </div>
+        </div>
+        """, unsafe_allow_html=True)
 
     st.markdown(f'<div class="nd-name">{nome_prof}</div>', unsafe_allow_html=True)
 
@@ -3305,23 +3311,61 @@ st.markdown("""
 # ===============================
 st.markdown("""
 <style>
-.nd-avatar-wrap {
-        width: 160px;
-        height: 160px;
-        margin: 0 auto 14px auto;
-        position: relative;
+/* Streamlit sometimes renders a legacy st.image() avatar inside the hero without our classes.
+   Hide any hero images that are NOT the premium avatar image. */
+.nd-hero img:not(.nd-avatar-img){
+  display: none !important;
 }
-.nd-avatar-inner {
-        width: 100%;
-        height: 100%;
-        border-radius: 999px;
-        overflow: hidden;
+
+/* Extra hard lock to prevent any stretching */
+.nd-avatar-wrap{
+  width: clamp(120px, 32vw, 170px) !important;
+  height: clamp(120px, 32vw, 170px) !important;
+  max-width: 170px !important;
+  max-height: 170px !important;
 }
-.nd-avatar-img {
-        width: 100%;
-        height: 100%;
-        object-fit: cover;
-        border-radius: 999px;
+
+.nd-avatar-inner{
+  width: 100% !important;
+  height: 100% !important;
 }
+
+.nd-avatar-img{
+  width: 100% !important;
+  height: 100% !important;
+  max-width: 100% !important;
+  max-height: 100% !important;
+  object-fit: cover !important;
+  border-radius: 999px !important;
+}
+
+/* Prevent the hero from letting any element overflow weirdly */
+.nd-hero{
+  overflow: hidden !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
+
+# ===============================
+# V15 — Avatar ring CSS (safe)
+# ===============================
+st.markdown("""
+<style>
+.nd-avatar-ring{
+  position:absolute;
+  inset:-7px;
+  border-radius:999px;
+  background: conic-gradient(from 180deg,
+    rgba(255,77,166,.98),
+    rgba(56,189,248,.92),
+    rgba(34,197,94,.84),
+    rgba(255,77,166,.98));
+  animation: ndSpin 7s linear infinite;
+  z-index:1;
+  filter: drop-shadow(0 10px 22px rgba(255, 77, 166, 0.20));
+  pointer-events:none;
+}
+@keyframes ndSpin { to { transform: rotate(360deg); } }
 </style>
 """, unsafe_allow_html=True)
