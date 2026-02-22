@@ -2717,6 +2717,131 @@ def tela_admin():
 
     menu_topo_comandos(access_token, tenant_id)
 
+    # ============================================================
+    # DASHBOARD: FATURAMENTO DO MÊS (premium)
+    # ============================================================
+    try:
+        settings_dash = get_tenant_settings_admin(access_token, tenant_id)
+        services_map_dash = settings_get_services(settings_dash)
+        deposit_cfg_dash = settings_get_deposit(settings_dash)
+        deposit_on_dash = bool(deposit_cfg_dash.get("enabled", True)) and float(deposit_cfg_dash.get("value", 0) or 0) > 0
+
+        df_dash = listar_agendamentos_admin(access_token, tenant_id)
+        if not df_dash.empty:
+            # mês atual
+            hoje_dash = date.today()
+            ym = (hoje_dash.year, hoje_dash.month)
+
+            df_dash["Data_dt"] = pd.to_datetime(df_dash["Data"], errors="coerce")
+            df_dash["Status_norm"] = df_dash["Status"].astype(str).apply(norm_status)
+
+            def _total_from_text(texto_servico: str) -> float:
+                servs = texto_para_lista_servicos(texto_servico)
+                return float(calcular_total_servicos(servs, services_map_dash))
+
+            df_dash["Total_servico"] = df_dash["Serviço(s)"].astype(str).apply(_total_from_text).astype(float)
+
+            df_mes = df_dash[df_dash["Data_dt"].notna()].copy()
+            df_mes = df_mes[(df_mes["Data_dt"].dt.year == ym[0]) & (df_mes["Data_dt"].dt.month == ym[1])]
+            df_pago = df_mes[df_mes["Status_norm"].isin(["pago", "finalizado"])].copy()
+
+            faturamento_mes = float(df_pago["Total_servico"].sum()) if not df_pago.empty else 0.0
+            atend_mes = int(len(df_pago))
+            sinais_mes = float(df_pago["Sinal"].sum()) if (deposit_on_dash and "Sinal" in df_pago.columns and not df_pago.empty) else 0.0
+
+            # comparação com mês passado (opcional)
+            # pega o mês anterior sem depender de libs extras
+            if hoje_dash.month == 1:
+                prev_year, prev_month = hoje_dash.year - 1, 12
+            else:
+                prev_year, prev_month = hoje_dash.year, hoje_dash.month - 1
+
+            df_prev = df_dash[df_dash["Data_dt"].notna()].copy()
+            df_prev = df_prev[(df_prev["Data_dt"].dt.year == prev_year) & (df_prev["Data_dt"].dt.month == prev_month)]
+            df_prev = df_prev[df_prev["Status_norm"].isin(["pago", "finalizado"])].copy()
+            faturamento_prev = float(df_prev["Total_servico"].sum()) if not df_prev.empty else 0.0
+
+            delta_pct = None
+            if faturamento_prev > 0:
+                delta_pct = (faturamento_mes - faturamento_prev) / faturamento_prev * 100.0
+
+            st.markdown(
+                """
+                <style>
+                .nd-kpi-card{
+                  background: rgba(255,255,255,.04);
+                  border: 1px solid rgba(255,255,255,.10);
+                  border-radius: 18px;
+                  padding: 16px 16px;
+                  margin: 8px 0 14px 0;
+                  box-shadow: 0 18px 50px rgba(0,0,0,.28);
+                }
+                .nd-kpi-top{
+                  display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap;
+                }
+                .nd-kpi-title{
+                  font-weight: 900; letter-spacing:.2px; font-size: 1.02rem; color: rgba(255,255,255,.92);
+                }
+                .nd-kpi-badge{
+                  display:inline-flex; align-items:center; gap:8px;
+                  background: rgba(34,197,94,.12);
+                  border: 1px solid rgba(34,197,94,.25);
+                  color: rgba(255,255,255,.92);
+                  padding: 8px 10px; border-radius: 999px; font-weight: 700; font-size: .92rem;
+                }
+                .nd-kpi-value{
+                  font-weight: 950; font-size: 2.05rem; margin-top: 6px; line-height: 1.1;
+                }
+                .nd-kpi-sub{
+                  display:flex; gap:10px; flex-wrap:wrap; margin-top: 10px;
+                  color: rgba(255,255,255,.78);
+                  font-size: .95rem;
+                }
+                .nd-kpi-pill{
+                  display:inline-flex; align-items:center; gap:8px;
+                  padding: 8px 10px; border-radius: 999px;
+                  background: rgba(255,255,255,.04);
+                  border: 1px solid rgba(255,255,255,.10);
+                }
+                </style>
+                """,
+                unsafe_allow_html=True,
+            )
+
+            # monta etiqueta de variação
+            if delta_pct is None:
+                var_txt = "—"
+                var_emoji = "📈"
+            else:
+                if delta_pct >= 0:
+                    var_txt = f"+{delta_pct:.0f}% vs mês passado"
+                    var_emoji = "📈"
+                else:
+                    var_txt = f"{delta_pct:.0f}% vs mês passado"
+                    var_emoji = "📉"
+
+            sub_pills = f"""<span class='nd-kpi-pill'>🗓️ {atend_mes} atendimentos</span>"""
+            if deposit_on_dash:
+                sub_pills += f"""<span class='nd-kpi-pill'>💠 Sinais: {fmt_brl(sinais_mes)}</span>"""
+
+            st.markdown(
+                f"""
+                <div class="nd-kpi-card">
+                  <div class="nd-kpi-top">
+                    <div class="nd-kpi-title">💰 Faturamento do mês</div>
+                    <div class="nd-kpi-badge">{var_emoji} {var_txt}</div>
+                  </div>
+                  <div class="nd-kpi-value">{fmt_brl(faturamento_mes)}</div>
+                  <div class="nd-kpi-sub">{sub_pills}</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+    except Exception:
+        # KPI é opcional (não quebra o app)
+        pass
+
+
     paid_until = parse_date_iso(tenant.get("paid_until"))
     hoje = date.today()
     pago = bool(paid_until and paid_until >= hoje)
