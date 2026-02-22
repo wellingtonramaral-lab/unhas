@@ -1493,6 +1493,76 @@ def horarios_do_dia_com_settings(d: date, working_hours: dict):
     return working_hours.get(wd, [])
 
 # ============================================================
+# MÉTRICAS FINANCEIRAS (ADMIN)
+# ============================================================
+def calcular_metricas_financeiras(df: pd.DataFrame):
+    if df.empty:
+        return {
+            "faturamento_mes": 0.0,
+            "previsto_mes": 0.0,
+            "qtd_mes": 0,
+            "sinais_mes": 0.0,
+            "crescimento": 0.0,
+            "historico": {}
+        }
+
+    hoje = date.today()
+    mes_atual = hoje.month
+    ano_atual = hoje.year
+
+    mes_passado = mes_atual - 1 if mes_atual > 1 else 12
+    ano_passado = ano_atual if mes_atual > 1 else ano_atual - 1
+
+    df["Data"] = pd.to_datetime(df["Data"], errors="coerce")
+
+    df_mes = df[
+        (df["Data"].dt.month == mes_atual) &
+        (df["Data"].dt.year == ano_atual)
+    ]
+
+    df_mes_passado = df[
+        (df["Data"].dt.month == mes_passado) &
+        (df["Data"].dt.year == ano_passado)
+    ]
+
+    faturamento_mes = df_mes[df_mes["Status"].isin(["pago","finalizado"])]["Sinal"].sum()
+    previsto_mes = df_mes[df_mes["Status"] == "pendente"]["Sinal"].sum()
+    qtd_mes = len(df_mes)
+    sinais_mes = df_mes["Sinal"].sum()
+
+    faturamento_mes_passado = df_mes_passado[df_mes_passado["Status"].isin(["pago","finalizado"])]["Sinal"].sum()
+
+    crescimento = 0
+    if faturamento_mes_passado > 0:
+        crescimento = ((faturamento_mes - faturamento_mes_passado) / faturamento_mes_passado) * 100
+
+    # Histórico últimos 6 meses
+    historico = {}
+    for i in range(6):
+        data_ref = hoje - pd.DateOffset(months=i)
+        mes = data_ref.month
+        ano = data_ref.year
+
+        df_hist = df[
+            (df["Data"].dt.month == mes) &
+            (df["Data"].dt.year == ano) &
+            (df["Status"].isin(["pago","finalizado"]))
+        ]
+
+        historico[f"{mes}/{ano}"] = df_hist["Sinal"].sum()
+
+    historico = dict(sorted(historico.items()))
+
+    return {
+        "faturamento_mes": faturamento_mes,
+        "previsto_mes": previsto_mes,
+        "qtd_mes": qtd_mes,
+        "sinais_mes": sinais_mes,
+        "crescimento": crescimento,
+        "historico": historico
+    }
+
+# ============================================================
 # MENU (expander) com itens
 # ============================================================
 def menu_topo_comandos(access_token: str, tenant_id: str):
@@ -2954,6 +3024,41 @@ def tela_admin():
         return f"{label}"
 
     df_admin = listar_agendamentos_admin(access_token, tenant_id)
+    
+    metricas = calcular_metricas_financeiras(df_admin)
+
+    st.markdown("### 💰 Faturamento do mês")
+
+    crescimento = metricas["crescimento"]
+    cor = "green" if crescimento >= 0 else "red"
+    icone = "📈" if crescimento >= 0 else "📉"
+
+    st.markdown(f"""
+<div style="
+padding:20px;
+border-radius:16px;
+background: linear-gradient(135deg, rgba(34,197,94,0.15), rgba(0,0,0,0.2));
+border:1px solid rgba(255,255,255,0.1);
+">
+    <h1 style="margin:0;font-size:36px;">R$ {metricas["faturamento_mes"]:,.2f}</h1>
+    <p style="color:{cor};margin:4px 0;">
+        {icone} {crescimento:.1f}% vs mês passado
+    </p>
+    <p style="margin:4px 0;">💸 Previsto: R$ {metricas["previsto_mes"]:,.2f}</p>
+    <p style="margin:4px 0;">📅 {metricas["qtd_mes"]} atendimentos</p>
+    <p style="margin:4px 0;">💎 Sinais: R$ {metricas["sinais_mes"]:,.2f}</p>
+</div>
+""", unsafe_allow_html=True)
+
+    # Gráfico últimos 6 meses
+    hist = metricas["historico"]
+    if hist:
+        df_chart = pd.DataFrame({
+            "Mês": list(hist.keys()),
+            "Faturamento": list(hist.values())
+        })
+        st.line_chart(df_chart.set_index("Mês"))
+    
     if df_admin.empty:
         st.info("Nenhum agendamento encontrado.")
     else:
