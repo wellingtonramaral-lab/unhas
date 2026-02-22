@@ -1527,7 +1527,13 @@ def menu_topo_comandos(access_token: str, tenant_id: str):
 
             st.markdown("#### 📷 Foto do perfil")
             if avatar_cur:
-                st.image(avatar_cur, width=120)
+                st.markdown(f"""
+<div class="nd-avatar-wrap">
+    <div class="nd-avatar-inner">
+        <img class="nd-avatar-img" src="{avatar_cur}">
+    </div>
+</div>
+""", unsafe_allow_html=True)
                 st.caption("Dica: use uma foto bem nítida do rosto (melhora a conversão).")
 
             up_avatar = st.file_uploader(
@@ -3299,37 +3305,23 @@ st.markdown("""
 # ===============================
 st.markdown("""
 <style>
-/* Streamlit sometimes renders a legacy st.image() avatar inside the hero without our classes.
-   Hide any hero images that are NOT the premium avatar image. */
-.nd-hero img:not(.nd-avatar-img){
-  display: none !important;
+.nd-avatar-wrap {
+        width: 160px;
+        height: 160px;
+        margin: 0 auto 14px auto;
+        position: relative;
 }
-
-/* Extra hard lock to prevent any stretching */
-.nd-avatar-wrap{
-  width: clamp(120px, 32vw, 170px) !important;
-  height: clamp(120px, 32vw, 170px) !important;
-  max-width: 170px !important;
-  max-height: 170px !important;
+.nd-avatar-inner {
+        width: 100%;
+        height: 100%;
+        border-radius: 999px;
+        overflow: hidden;
 }
-
-.nd-avatar-inner{
-  width: 100% !important;
-  height: 100% !important;
-}
-
-.nd-avatar-img{
-  width: 100% !important;
-  height: 100% !important;
-  max-width: 100% !important;
-  max-height: 100% !important;
-  object-fit: cover !important;
-  border-radius: 999px !important;
-}
-
-/* Prevent the hero from letting any element overflow weirdly */
-.nd-hero{
-  overflow: hidden !important;
+.nd-avatar-img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        border-radius: 999px;
 }
 </style>
 """, unsafe_allow_html=True)
