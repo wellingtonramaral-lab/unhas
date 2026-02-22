@@ -98,7 +98,10 @@ div[data-testid="stStatusWidget"] {
 
 /* Remove espaço inferior */
 .block-container {
-    padding-bottom: 0rem !important;
+    padding-bottom: 6.5rem !important; /* space for fixed CTA (mobile) */
+}
+@media (min-width: 900px){
+  .block-container{ padding-bottom: 5.0rem !important; }
 }
 
 </style>
@@ -1950,7 +1953,46 @@ def tela_publica():
           color: rgba(255,255,255,.75);
           font-size: .92rem;
         }
-        .nd-fixed-cta{
+        
+/* --- Mobile conversion tweaks --- */
+@media (max-width: 520px){
+  .nd-badges{
+    width: 100%;
+    gap: 12px;
+    margin-top: .55rem;
+  }
+  .nd-badge{
+    width: 100%;
+    justify-content: center;
+    padding: 12px 14px;
+    font-size: .98rem;
+  }
+  .nd-fixed-cta{
+    left: 12px;
+    right: 12px;
+    bottom: 12px;
+  }
+  .nd-fixed-cta a{
+    border-radius: 18px;
+    padding: 16px 16px;
+    font-size: 17px;
+  }
+  .nd-bio span{
+    display:block;
+  }
+  .nd-bio span + span{
+    margin-top: 4px;
+  }
+}
+@media (min-width: 521px){
+  .nd-bio span{
+    display:inline;
+  }
+  .nd-bio span + span{
+    margin-left: 8px;
+  }
+}
+.nd-fixed-cta{
           position: fixed;
           left: 14px;
           right: 14px;
@@ -2096,10 +2138,20 @@ def tela_publica():
 
     st.markdown(f'<div class="nd-name">{nome_prof}</div>', unsafe_allow_html=True)
 
-    if bio:
-        st.markdown(f'<div class="nd-bio">{bio}</div>', unsafe_allow_html=True)
-    else:
-        st.markdown('<div class="nd-bio">✨ Alongamento • Manicure • Nail Art</div>', unsafe_allow_html=True)
+    def _format_bio_html(raw: str) -> str:
+        """Format bio as 2 lines on mobile for better readability."""
+        import re as _re
+        raw = (raw or "").strip()
+        if not raw:
+            raw = "Alongamento • Manicure • Nail Art"
+        parts = [p.strip() for p in _re.split(r"[•·|]", raw) if p.strip()]
+        if len(parts) >= 2:
+            line1 = f"✨ {parts[0]}"
+            line2 = "💅 " + " • ".join(parts[1:])
+            return f"<span>{line1}</span><span>{line2}</span>"
+        return f"<span>✨ {raw}</span>"
+
+    st.markdown(f'<div class="nd-bio">{_format_bio_html(bio)}</div>', unsafe_allow_html=True)
 
     badges = []
     if city:
