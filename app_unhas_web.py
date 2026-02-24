@@ -270,6 +270,41 @@ def apply_theme():
                     }
                 }
 
+                                /* Meta mensal (card + progress bar) */
+                                .meta-card {
+                                    margin-top: 18px;
+                                    padding: 20px;
+                                    border-radius: 20px;
+                                    background: linear-gradient(135deg, rgba(16,185,129,.15), rgba(56,189,248,.08));
+                                    border: 1px solid rgba(255,255,255,.08);
+                                }
+
+                                .meta-title {
+                                    font-weight: 600;
+                                    font-size: 15px;
+                                    opacity: .8;
+                                }
+
+                                .meta-value {
+                                    font-size: 28px;
+                                    font-weight: 800;
+                                    margin-top: 4px;
+                                }
+
+                                .meta-bar {
+                                    height: 12px;
+                                    border-radius: 999px;
+                                    background: rgba(255,255,255,.08);
+                                    overflow: hidden;
+                                    margin-top: 14px;
+                                }
+
+                                .meta-progress {
+                                    height: 100%;
+                                    background: linear-gradient(90deg, #10b981, #38bdf8);
+                                    transition: width .4s ease;
+                                }
+
                 </style>
                 """,
                 unsafe_allow_html=True,
@@ -2907,6 +2942,25 @@ def tela_admin():
 
         sinais_mes = float(df_mes["Sinal"].sum() or 0.0) if deposit_on else 0.0
 
+        # ===== META: expose variables for monthly goal =====
+        total_mes = faturamento_mes
+        quantidade = atend_mes
+
+        # ===== META MENSAL =====
+        META_MENSAL = 3000.0  # você pode mudar depois
+
+        ticket_medio = 0
+        if quantidade > 0:
+            ticket_medio = total_mes / quantidade
+
+        faltam_valor = max(META_MENSAL - total_mes, 0)
+
+        faltam_atendimentos = 0
+        if ticket_medio > 0:
+            faltam_atendimentos = round(faltam_valor / ticket_medio)
+
+        percentual_meta = min((total_mes / META_MENSAL) * 100, 100)
+
         # Mês anterior (para %)
         mask_prev = _between(df_admin["Data_dt"], inicio_prev, fim_prev)
         df_prev = df_admin[mask_prev].copy()
@@ -2970,6 +3024,27 @@ def tela_admin():
             """,
             unsafe_allow_html=True,
         )
+
+                # ===== Render meta mensal (logo abaixo do KPI principal) =====
+                meta_atend_text = f" (~{faltam_atendimentos} atendimentos)" if faltam_atendimentos > 0 else ""
+                st.markdown(f"""
+                <div class="meta-card">
+                    <div class="meta-title">Meta do mês</div>
+                    <div class="meta-value">{fmt_brl(META_MENSAL)}</div>
+                    <div style="margin-top:8px; opacity:.8;">
+                        Você já alcançou {percentual_meta:.0f}% da meta
+                    </div>
+
+                    <div class="meta-bar">
+                        <div class="meta-progress" style="width:{percentual_meta}%;"></div>
+                    </div>
+
+                    <div style="margin-top:12px; font-size:14px; opacity:.9;">
+                        Faltam <b>{fmt_brl(faltam_valor)}</b>
+                        {meta_atend_text}
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
 
         # Gráfico últimos 6 meses (valor total dos serviços pagos/finalizados)
         try:
