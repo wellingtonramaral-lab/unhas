@@ -256,59 +256,11 @@ def apply_theme():
           box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.45) !important;
         }
 
-                .chip b{ color: var(--text); }
-
-                /* KPI principal (mobile + desktop) */
-                .kpi-main h1 {
-                    font-size: 42px;
-                    font-weight: 800;
-                }
-
-                @media (max-width: 768px){
-                    .kpi-main h1{
-                        font-size: 34px !important;
-                    }
-                }
-
-                                /* Meta mensal (card + progress bar) */
-                                .meta-card {
-                                    margin-top: 18px;
-                                    padding: 20px;
-                                    border-radius: 20px;
-                                    background: linear-gradient(135deg, rgba(16,185,129,.15), rgba(56,189,248,.08));
-                                    border: 1px solid rgba(255,255,255,.08);
-                                }
-
-                                .meta-title {
-                                    font-weight: 600;
-                                    font-size: 15px;
-                                    opacity: .8;
-                                }
-
-                                .meta-value {
-                                    font-size: 28px;
-                                    font-weight: 800;
-                                    margin-top: 4px;
-                                }
-
-                                .meta-bar {
-                                    height: 12px;
-                                    border-radius: 999px;
-                                    background: rgba(255,255,255,.08);
-                                    overflow: hidden;
-                                    margin-top: 14px;
-                                }
-
-                                .meta-progress {
-                                    height: 100%;
-                                    background: linear-gradient(90deg, #10b981, #38bdf8);
-                                    transition: width .4s ease;
-                                }
-
-                </style>
-                """,
-                unsafe_allow_html=True,
-        )
+        .chip b{ color: var(--text); }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
 
 apply_theme()
 
@@ -318,31 +270,37 @@ apply_theme()
 st.markdown("""
 <style>
 .footer-logout {
-    margin-top: 60px;
-    padding: 16px;
-    background: rgba(7, 11, 18, 0.85);
-    border: 1px solid rgba(255,255,255,.08);
-    border-radius: 18px;
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 14px 16px;
+  background: rgba(7, 11, 18, 0.70);
+  backdrop-filter: blur(8px);
+  border-top: 1px solid rgba(255,255,255,.10);
+  z-index: 9999;
 }
 
 .footer-logout a {
-    display: block;
-    text-align: center;
-    padding: 14px;
-    border-radius: 14px;
-    text-decoration: none;
-    border: 1px solid rgba(255,255,255,.16);
-    background: rgba(255,255,255,.04);
-    color: rgba(255,255,255,.92);
-    font-weight: 600;
-    transition: all .2s ease;
+  display: block;
+  text-align: center;
+  padding: 12px 14px;
+  border-radius: 14px;
+  text-decoration: none;
+  border: 1px solid rgba(255,255,255,.16);
+  background: rgba(255,255,255,.04);
+  color: rgba(255,255,255,.92);
+  font-weight: 700;
 }
 
 .footer-logout a:hover {
-    transform: translateY(-2px);
-    border-color: rgba(56, 189, 248, .55);
-    background: rgba(56, 189, 248, .10);
+  transform: translateY(-1px);
+  border-color: rgba(56, 189, 248, .55);
+  background: rgba(56, 189, 248, .10);
 }
+
+/* espaço para não esconder conteúdo atrás do rodapé */
+.block-container { padding-bottom: 110px !important; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -2942,25 +2900,6 @@ def tela_admin():
 
         sinais_mes = float(df_mes["Sinal"].sum() or 0.0) if deposit_on else 0.0
 
-        # ===== META: expose variables for monthly goal =====
-        total_mes = faturamento_mes
-        quantidade = atend_mes
-
-        # ===== META MENSAL =====
-        META_MENSAL = 3000.0  # você pode mudar depois
-
-        ticket_medio = 0
-        if quantidade > 0:
-            ticket_medio = total_mes / quantidade
-
-        faltam_valor = max(META_MENSAL - total_mes, 0)
-
-        faltam_atendimentos = 0
-        if ticket_medio > 0:
-            faltam_atendimentos = round(faltam_valor / ticket_medio)
-
-        percentual_meta = min((total_mes / META_MENSAL) * 100, 100)
-
         # Mês anterior (para %)
         mask_prev = _between(df_admin["Data_dt"], inicio_prev, fim_prev)
         df_prev = df_admin[mask_prev].copy()
@@ -3010,10 +2949,8 @@ def tela_admin():
                   <h3>💰 Faturamento do mês</h3>
                   <span style="font-size:13px;color:{cor};font-weight:700">{icone} {crescimento:.1f}% vs mês passado</span>
                 </div>
-                                <div class="kpi-main">
-                                    <h1>{fmt_brl(faturamento_mes)}</h1>
-                                </div>
-                                <div class="kpi-sub">+ R$ {faturamento_semana:,.2f} esta semana</div>
+                <div class="kpi-big">R$ {faturamento_mes:,.2f}</div>
+                <div class="kpi-sub">+ R$ {faturamento_semana:,.2f} esta semana</div>
                 <div class="kpi-row">
                   <span class="kpi-pill">📅 {atend_mes} atendimentos</span>
                   <span class="kpi-pill">💸 Previsto (pendentes): R$ {previsto_mes:,.2f}</span>
@@ -3025,45 +2962,142 @@ def tela_admin():
             unsafe_allow_html=True,
         )
 
-                # ===== Render meta mensal (logo abaixo do KPI principal) =====
-                meta_atend_text = f" (~{faltam_atendimentos} atendimentos)" if faltam_atendimentos > 0 else ""
-                st.markdown(f"""
-                <div class="meta-card">
-                    <div class="meta-title">Meta do mês</div>
-                    <div class="meta-value">{fmt_brl(META_MENSAL)}</div>
-                    <div style="margin-top:8px; opacity:.8;">
-                        Você já alcançou {percentual_meta:.0f}% da meta
-                    </div>
-
-                    <div class="meta-bar">
-                        <div class="meta-progress" style="width:{percentual_meta}%;"></div>
-                    </div>
-
-                    <div style="margin-top:12px; font-size:14px; opacity:.9;">
-                        Faltam <b>{fmt_brl(faltam_valor)}</b>
-                        {meta_atend_text}
-                    </div>
-                </div>
-                """, unsafe_allow_html=True)
-
-        # Gráfico últimos 6 meses (valor total dos serviços pagos/finalizados)
+        
+        # ===========================
+        # Painel "coach de dinheiro"
+        # ===========================
         try:
+            # Meta configurável (salva na sessão)
+            if "meta_mensal" not in st.session_state:
+                st.session_state.meta_mensal = 3000.0
+
+            # Cálculos base
+            meta_mensal = float(st.session_state.meta_mensal or 0.0)
+            ticket_medio = (faturamento_mes / atend_mes) if atend_mes else 0.0
+            faltam_valor = max(meta_mensal - faturamento_mes, 0.0)
+            faltam_atend = int(round(faltam_valor / ticket_medio)) if ticket_medio > 0 else 0
+            perc_meta = (faturamento_mes / meta_mensal * 100.0) if meta_mensal > 0 else 0.0
+            perc_meta = max(0.0, min(perc_meta, 100.0))
+
+            # Semana (segunda -> domingo)
+            hoje = datetime.now().date()
+            inicio_semana = hoje - timedelta(days=hoje.weekday())
+            fim_semana = inicio_semana + timedelta(days=6)
+
+            dfw = df_admin.copy()
+            dfw = dfw[dfw["Data_dt"].notna()].copy()
+            dfw["d"] = dfw["Data_dt"].dt.date
+
+            dfw_sem = dfw[(dfw["d"] >= inicio_semana) & (dfw["d"] <= fim_semana)].copy()
+
+            recebido_sem = float(dfw_sem[dfw_sem["Status_norm"].isin(["pago", "finalizado"])]["Preço do serviço"].sum() or 0.0)
+            previsto_sem = float(dfw_sem[dfw_sem["Status_norm"].isin(["pendente"])]["Preço do serviço"].sum() or 0.0)
+            cancel_sem = int((dfw_sem["Status_norm"] == "cancelado").sum())
+
+            # Ações sugeridas (pendentes)
+            pend_count = int((df_mes["Status_norm"] == "pendente").sum()) if "df_mes" in locals() else int((df_admin["Status_norm"]=="pendente").sum())
+            pend_valor = float(df_mes[df_mes["Status_norm"] == "pendente"]["Preço do serviço"].sum() or 0.0) if "df_mes" in locals() else float(df_admin[df_admin["Status_norm"]=="pendente"]["Preço do serviço"].sum() or 0.0)
+
+            # UI
+            c1, c2 = st.columns([1.1, 0.9], gap="large")
+
+            with c1:
+                st.markdown("#### 🎯 Meta do mês")
+                st.session_state.meta_mensal = st.number_input(
+                    "Meta do mês (R$)",
+                    min_value=0.0,
+                    value=float(st.session_state.meta_mensal),
+                    step=100.0,
+                    format="%.2f",
+                    help="Defina uma meta simples. Isso transforma o painel em direção, não só números.",
+                    label_visibility="collapsed",
+                )
+
+                st.progress(perc_meta / 100.0)
+                st.caption(
+                    f"Você já fez **R$ {faturamento_mes:,.2f}** ({perc_meta:.0f}%). "
+                    f"Faltam **R$ {faltam_valor:,.2f}**"
+                    + (f" (~{faltam_atend} atendimentos)" if faltam_atend > 0 else "")
+                    + (f" • Ticket médio: **R$ {ticket_medio:,.2f}**" if ticket_medio > 0 else "")
+                )
+
+            with c2:
+                st.markdown("#### 🗓️ Resumo da semana")
+                st.metric("Recebido", f"R$ {recebido_sem:,.2f}")
+                st.metric("A receber", f"R$ {previsto_sem:,.2f}")
+                st.metric("Cancelamentos", f"{cancel_sem}")
+
+                st.markdown("#### ⚡ Ações sugeridas")
+                if pend_count > 0:
+                    st.warning(f"Você tem **{pend_count} pendentes** (≈ R$ {pend_valor:,.2f}).")
+                    # Link WA com texto pronto (usuário escolhe o contato)
+                    wa_text = urllib.parse.quote(
+                        "Oi! 😊 Só confirmando seu horário/ pagamento do atendimento. "
+                        "Posso te enviar o Pix do sinal pra garantir sua vaga? 💎"
+                    )
+                    st.markdown(f"👉 Abrir WhatsApp com mensagem pronta: https://wa.me/?text={wa_text}")
+                else:
+                    st.success("Sem pendências agora. 🔥")
+
+                # Clientes sumidos (último atendimento > 30 dias)
+                try:
+                    df_last = dfw[dfw["Cliente"].notna()].copy()
+                    df_last = df_last.sort_values("Data_dt").groupby("Cliente", as_index=False).tail(1)
+                    df_last["dias"] = (pd.to_datetime(hoje) - df_last["Data_dt"]).dt.days
+                    df_sumidos = df_last[df_last["dias"] >= 30].sort_values("dias", ascending=False).head(8)
+                    if len(df_sumidos) > 0:
+                        with st.expander("👀 Clientes que sumiram (30+ dias)"):
+                            st.dataframe(df_sumidos[["Cliente", "dias"]].rename(columns={"dias":"Dias sem vir"}), use_container_width=True, hide_index=True)
+                except Exception:
+                    pass
+
+            st.divider()
+        except Exception:
+            # Nunca quebrar o painel por causa desses extras
+            pass
+
+
+        # Gráfico (Recebido x Previsto)
+        try:
+            periodo = st.radio(
+                "Período do gráfico",
+                ["6 meses", "12 meses"],
+                horizontal=True,
+                label_visibility="collapsed",
+                key="k_chart_period",
+            )
+            n_meses = 6 if periodo.startswith("6") else 12
+
             df_chart = df_admin.copy()
             df_chart = df_chart[df_chart["Data_dt"].notna()].copy()
             df_chart["ym"] = df_chart["Data_dt"].dt.to_period("M").astype(str)
-            df_chart = df_chart[df_chart["Status_norm"].isin(["pago", "finalizado"])]
-            serie = (
-                df_chart.groupby("ym")["Preço do serviço"]
+
+            recebido = (
+                df_chart[df_chart["Status_norm"].isin(["pago", "finalizado"])]
+                .groupby("ym")["Preço do serviço"]
+                .sum()
+                .sort_index()
+            )
+            previsto = (
+                df_chart[df_chart["Status_norm"].isin(["pendente"])]
+                .groupby("ym")["Preço do serviço"]
                 .sum()
                 .sort_index()
             )
 
-            # pega últimos 6 meses (inclui mês atual)
-            if len(serie) > 0:
-                serie = serie.tail(6)
-                chart_df = pd.DataFrame({"Mês": serie.index.tolist(), "Faturamento": serie.values.tolist()}).set_index("Mês")
-                st.caption("📊 Últimos 6 meses — faturamento confirmado (pago + finalizado)")
+            # garantir meses contínuos (últimos n meses)
+            if len(df_chart) > 0:
+                ultimo = df_chart["Data_dt"].max().to_period("M")
+                meses = pd.period_range(end=ultimo, periods=n_meses, freq="M").astype(str)
+                chart_df = pd.DataFrame(index=meses)
+                chart_df["Recebido"] = [float(recebido.get(m, 0.0) or 0.0) for m in meses]
+                chart_df["Previsto"] = [float(previsto.get(m, 0.0) or 0.0) for m in meses]
+
+                st.caption("📊 Faturamento por mês — **Recebido** (pago/finalizado) vs **Previsto** (pendente)")
                 st.line_chart(chart_df)
+        except Exception:
+            # não quebra o painel se algo inesperado acontecer
+            pass
         except Exception:
             # não quebra o painel se algo inesperado acontecer
             pass
