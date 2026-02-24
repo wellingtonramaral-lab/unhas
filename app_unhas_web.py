@@ -1,5 +1,4 @@
 import streamlit as st
-import json
 import streamlit.components.v1 as components
 import pandas as pd
 from datetime import date, datetime, timedelta, timezone
@@ -9,6 +8,7 @@ import fitz  # PyMuPDF
 from PIL import Image
 import io
 import re
+import json
 import unicodedata
 from supabase import create_client
 from streamlit_js_eval import get_page_location
@@ -26,6 +26,7 @@ def handle_recovery_token():
     # quando o Supabase usa query (?access_token=)
     if "access_token" in params:
         st.session_state.access_token = params["access_token"][0]
+        _ls_set("agenda_pro_access_token", st.session_state.access_token)
         st.query_params.clear()
         return True
 
@@ -45,6 +46,7 @@ def handle_recovery_token():
 
             if "access_token" in data:
                 st.session_state.access_token = data["access_token"]
+                _ls_set("agenda_pro_access_token", st.session_state.access_token)
                 streamlit_js_eval(
                     js_expressions="window.location.hash = ''",
                     want_output=False,
@@ -67,45 +69,6 @@ except Exception:
 # ============================================================
 # STREAMLIT CONFIG + THEME (Agenda-Pro)
 # ============================================================
-
-# ============================================================
-# PERSISTÊNCIA DE LOGIN (evita desconectar ao atualizar a página)
-# Usa localStorage via streamlit_js_eval (dependência leve).
-# ============================================================
-def _js_get_local_token(key: str) -> str | None:
-    try:
-        from streamlit_js_eval import streamlit_js_eval
-        return streamlit_js_eval(
-            js_expressions=f"localStorage.getItem('{key}')",
-            want_output=True,
-            key=f"ls_get_{key}",
-        )
-    except Exception:
-        return None
-
-def _js_set_local_token(key: str, value: str):
-    try:
-        from streamlit_js_eval import streamlit_js_eval
-        safe = json.dumps(value)  # string com aspas/escape
-        streamlit_js_eval(
-            js_expressions=f"localStorage.setItem('{key}', {safe})",
-            want_output=False,
-            key=f"ls_set_{key}",
-        )
-    except Exception:
-        pass
-
-def _js_clear_local_token(key: str):
-    try:
-        from streamlit_js_eval import streamlit_js_eval
-        streamlit_js_eval(
-            js_expressions=f"localStorage.removeItem('{key}')",
-            want_output=False,
-            key=f"ls_del_{key}",
-        )
-    except Exception:
-        pass
-
 
 st.set_page_config(
     page_title="Agenda-Pro",
@@ -641,6 +604,7 @@ def tela_reset_senha():
         st.success("✅ Senha atualizada! Agora faça login.")
         st.query_params.clear()
         st.session_state.access_token = None
+        _ls_del("agenda_pro_access_token")
         st.rerun()
 
 # ============================================================
@@ -648,11 +612,49 @@ def tela_reset_senha():
 # ============================================================
 if "access_token" not in st.session_state:
     st.session_state.access_token = None
-# tenta restaurar token do navegador (F5 / refresh)
+# tenta restaurar token do navegador (F5/refresh)
 if st.session_state.access_token is None:
-    _tok = _js_get_local_token("agenda_pro_access_token")
+    _tok = _ls_get("agenda_pro_access_token")
     if _tok:
         st.session_state.access_token = _tok
+
+# ============================================================
+# PERSISTÊNCIA DE LOGIN (evita desconectar ao atualizar a página)
+# Guarda access_token no localStorage do navegador.
+# ============================================================
+def _ls_get(key: str):
+    try:
+        from streamlit_js_eval import streamlit_js_eval
+        return streamlit_js_eval(
+            js_expressions=f"localStorage.getItem('{key}')",
+            want_output=True,
+            key=f"ls_get_{key}",
+        )
+    except Exception:
+        return None
+
+def _ls_set(key: str, value: str):
+    try:
+        from streamlit_js_eval import streamlit_js_eval
+        safe = json.dumps(value)
+        streamlit_js_eval(
+            js_expressions=f"localStorage.setItem('{key}', {safe})",
+            want_output=False,
+            key=f"ls_set_{key}",
+        )
+    except Exception:
+        pass
+
+def _ls_del(key: str):
+    try:
+        from streamlit_js_eval import streamlit_js_eval
+        streamlit_js_eval(
+            js_expressions=f"localStorage.removeItem('{key}')",
+            want_output=False,
+            key=f"ls_del_{key}",
+        )
+    except Exception:
+        pass
 
 if "wa_link" not in st.session_state:
     st.session_state.wa_link = None
@@ -689,7 +691,7 @@ def auth_login(email: str, password: str):
 
 def auth_logout():
     st.session_state.access_token = None
-    _js_clear_local_token("agenda_pro_access_token")
+    _ls_del("agenda_pro_access_token")
     st.rerun()
 
 def get_auth_user(access_token: str):
@@ -1491,76 +1493,6 @@ WEEKDAY_LABELS = {
 def horarios_do_dia_com_settings(d: date, working_hours: dict):
     wd = str(d.weekday())
     return working_hours.get(wd, [])
-
-# ============================================================
-# MÉTRICAS FINANCEIRAS (ADMIN)
-# ============================================================
-def calcular_metricas_financeiras(df: pd.DataFrame):
-    if df.empty:
-        return {
-            "faturamento_mes": 0.0,
-            "previsto_mes": 0.0,
-            "qtd_mes": 0,
-            "sinais_mes": 0.0,
-            "crescimento": 0.0,
-            "historico": {}
-        }
-
-    hoje = date.today()
-    mes_atual = hoje.month
-    ano_atual = hoje.year
-
-    mes_passado = mes_atual - 1 if mes_atual > 1 else 12
-    ano_passado = ano_atual if mes_atual > 1 else ano_atual - 1
-
-    df["Data"] = pd.to_datetime(df["Data"], errors="coerce")
-
-    df_mes = df[
-        (df["Data"].dt.month == mes_atual) &
-        (df["Data"].dt.year == ano_atual)
-    ]
-
-    df_mes_passado = df[
-        (df["Data"].dt.month == mes_passado) &
-        (df["Data"].dt.year == ano_passado)
-    ]
-
-    faturamento_mes = df_mes[df_mes["Status"].isin(["pago","finalizado"])]["Sinal"].sum()
-    previsto_mes = df_mes[df_mes["Status"] == "pendente"]["Sinal"].sum()
-    qtd_mes = len(df_mes)
-    sinais_mes = df_mes["Sinal"].sum()
-
-    faturamento_mes_passado = df_mes_passado[df_mes_passado["Status"].isin(["pago","finalizado"])]["Sinal"].sum()
-
-    crescimento = 0
-    if faturamento_mes_passado > 0:
-        crescimento = ((faturamento_mes - faturamento_mes_passado) / faturamento_mes_passado) * 100
-
-    # Histórico últimos 6 meses
-    historico = {}
-    for i in range(6):
-        data_ref = hoje - pd.DateOffset(months=i)
-        mes = data_ref.month
-        ano = data_ref.year
-
-        df_hist = df[
-            (df["Data"].dt.month == mes) &
-            (df["Data"].dt.year == ano) &
-            (df["Status"].isin(["pago","finalizado"]))
-        ]
-
-        historico[f"{mes}/{ano}"] = df_hist["Sinal"].sum()
-
-    historico = dict(sorted(historico.items()))
-
-    return {
-        "faturamento_mes": faturamento_mes,
-        "previsto_mes": previsto_mes,
-        "qtd_mes": qtd_mes,
-        "sinais_mes": sinais_mes,
-        "crescimento": crescimento,
-        "historico": historico
-    }
 
 # ============================================================
 # MENU (expander) com itens
@@ -2665,7 +2597,7 @@ def tela_admin():
                         try:
                             res = auth_login(email, password)
                             st.session_state.access_token = res.session.access_token
-                            _js_set_local_token("agenda_pro_access_token", res.session.access_token)
+                            _ls_set("agenda_pro_access_token", st.session_state.access_token)
                             st.rerun()
                         except Exception as e:
                             st.error("Falha no login.")
@@ -2835,131 +2767,6 @@ def tela_admin():
 
     menu_topo_comandos(access_token, tenant_id)
 
-    # ============================================================
-    # DASHBOARD: FATURAMENTO DO MÊS (premium)
-    # ============================================================
-    try:
-        settings_dash = get_tenant_settings_admin(access_token, tenant_id)
-        services_map_dash = settings_get_services(settings_dash)
-        deposit_cfg_dash = settings_get_deposit(settings_dash)
-        deposit_on_dash = bool(deposit_cfg_dash.get("enabled", True)) and float(deposit_cfg_dash.get("value", 0) or 0) > 0
-
-        df_dash = listar_agendamentos_admin(access_token, tenant_id)
-        if not df_dash.empty:
-            # mês atual
-            hoje_dash = date.today()
-            ym = (hoje_dash.year, hoje_dash.month)
-
-            df_dash["Data_dt"] = pd.to_datetime(df_dash["Data"], errors="coerce")
-            df_dash["Status_norm"] = df_dash["Status"].astype(str).apply(norm_status)
-
-            def _total_from_text(texto_servico: str) -> float:
-                servs = texto_para_lista_servicos(texto_servico)
-                return float(calcular_total_servicos(servs, services_map_dash))
-
-            df_dash["Total_servico"] = df_dash["Serviço(s)"].astype(str).apply(_total_from_text).astype(float)
-
-            df_mes = df_dash[df_dash["Data_dt"].notna()].copy()
-            df_mes = df_mes[(df_mes["Data_dt"].dt.year == ym[0]) & (df_mes["Data_dt"].dt.month == ym[1])]
-            df_pago = df_mes[df_mes["Status_norm"].isin(["pago", "finalizado"])].copy()
-
-            faturamento_mes = float(df_pago["Total_servico"].sum()) if not df_pago.empty else 0.0
-            atend_mes = int(len(df_pago))
-            sinais_mes = float(df_pago["Sinal"].sum()) if (deposit_on_dash and "Sinal" in df_pago.columns and not df_pago.empty) else 0.0
-
-            # comparação com mês passado (opcional)
-            # pega o mês anterior sem depender de libs extras
-            if hoje_dash.month == 1:
-                prev_year, prev_month = hoje_dash.year - 1, 12
-            else:
-                prev_year, prev_month = hoje_dash.year, hoje_dash.month - 1
-
-            df_prev = df_dash[df_dash["Data_dt"].notna()].copy()
-            df_prev = df_prev[(df_prev["Data_dt"].dt.year == prev_year) & (df_prev["Data_dt"].dt.month == prev_month)]
-            df_prev = df_prev[df_prev["Status_norm"].isin(["pago", "finalizado"])].copy()
-            faturamento_prev = float(df_prev["Total_servico"].sum()) if not df_prev.empty else 0.0
-
-            delta_pct = None
-            if faturamento_prev > 0:
-                delta_pct = (faturamento_mes - faturamento_prev) / faturamento_prev * 100.0
-
-            st.markdown(
-                """
-                <style>
-                .nd-kpi-card{
-                  background: rgba(255,255,255,.04);
-                  border: 1px solid rgba(255,255,255,.10);
-                  border-radius: 18px;
-                  padding: 16px 16px;
-                  margin: 8px 0 14px 0;
-                  box-shadow: 0 18px 50px rgba(0,0,0,.28);
-                }
-                .nd-kpi-top{
-                  display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap;
-                }
-                .nd-kpi-title{
-                  font-weight: 900; letter-spacing:.2px; font-size: 1.02rem; color: rgba(255,255,255,.92);
-                }
-                .nd-kpi-badge{
-                  display:inline-flex; align-items:center; gap:8px;
-                  background: rgba(34,197,94,.12);
-                  border: 1px solid rgba(34,197,94,.25);
-                  color: rgba(255,255,255,.92);
-                  padding: 8px 10px; border-radius: 999px; font-weight: 700; font-size: .92rem;
-                }
-                .nd-kpi-value{
-                  font-weight: 950; font-size: 2.05rem; margin-top: 6px; line-height: 1.1;
-                }
-                .nd-kpi-sub{
-                  display:flex; gap:10px; flex-wrap:wrap; margin-top: 10px;
-                  color: rgba(255,255,255,.78);
-                  font-size: .95rem;
-                }
-                .nd-kpi-pill{
-                  display:inline-flex; align-items:center; gap:8px;
-                  padding: 8px 10px; border-radius: 999px;
-                  background: rgba(255,255,255,.04);
-                  border: 1px solid rgba(255,255,255,.10);
-                }
-                </style>
-                """,
-                unsafe_allow_html=True,
-            )
-
-            # monta etiqueta de variação
-            if delta_pct is None:
-                var_txt = "—"
-                var_emoji = "📈"
-            else:
-                if delta_pct >= 0:
-                    var_txt = f"+{delta_pct:.0f}% vs mês passado"
-                    var_emoji = "📈"
-                else:
-                    var_txt = f"{delta_pct:.0f}% vs mês passado"
-                    var_emoji = "📉"
-
-            sub_pills = f"""<span class='nd-kpi-pill'>🗓️ {atend_mes} atendimentos</span>"""
-            if deposit_on_dash:
-                sub_pills += f"""<span class='nd-kpi-pill'>💠 Sinais: {fmt_brl(sinais_mes)}</span>"""
-
-            st.markdown(
-                f"""
-                <div class="nd-kpi-card">
-                  <div class="nd-kpi-top">
-                    <div class="nd-kpi-title">💰 Faturamento do mês</div>
-                    <div class="nd-kpi-badge">{var_emoji} {var_txt}</div>
-                  </div>
-                  <div class="nd-kpi-value">{fmt_brl(faturamento_mes)}</div>
-                  <div class="nd-kpi-sub">{sub_pills}</div>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-    except Exception:
-        # KPI é opcional (não quebra o app)
-        pass
-
-
     paid_until = parse_date_iso(tenant.get("paid_until"))
     hoje = date.today()
     pago = bool(paid_until and paid_until >= hoje)
@@ -3024,41 +2831,6 @@ def tela_admin():
         return f"{label}"
 
     df_admin = listar_agendamentos_admin(access_token, tenant_id)
-    
-    metricas = calcular_metricas_financeiras(df_admin)
-
-    st.markdown("### 💰 Faturamento do mês")
-
-    crescimento = metricas["crescimento"]
-    cor = "green" if crescimento >= 0 else "red"
-    icone = "📈" if crescimento >= 0 else "📉"
-
-    st.markdown(f"""
-<div style="
-padding:20px;
-border-radius:16px;
-background: linear-gradient(135deg, rgba(34,197,94,0.15), rgba(0,0,0,0.2));
-border:1px solid rgba(255,255,255,0.1);
-">
-    <h1 style="margin:0;font-size:36px;">R$ {metricas["faturamento_mes"]:,.2f}</h1>
-    <p style="color:{cor};margin:4px 0;">
-        {icone} {crescimento:.1f}% vs mês passado
-    </p>
-    <p style="margin:4px 0;">💸 Previsto: R$ {metricas["previsto_mes"]:,.2f}</p>
-    <p style="margin:4px 0;">📅 {metricas["qtd_mes"]} atendimentos</p>
-    <p style="margin:4px 0;">💎 Sinais: R$ {metricas["sinais_mes"]:,.2f}</p>
-</div>
-""", unsafe_allow_html=True)
-
-    # Gráfico últimos 6 meses
-    hist = metricas["historico"]
-    if hist:
-        df_chart = pd.DataFrame({
-            "Mês": list(hist.keys()),
-            "Faturamento": list(hist.values())
-        })
-        st.line_chart(df_chart.set_index("Mês"))
-    
     if df_admin.empty:
         st.info("Nenhum agendamento encontrado.")
     else:
@@ -3089,6 +2861,127 @@ border:1px solid rgba(255,255,255,0.1);
         else:
             # fallback: mantém status label normal
             df_admin["Status"] = df_admin["Status_norm"].apply(lambda s: STATUS_LABELS.get(s, s))
+
+
+        # --------- FINANCEIRO (KPI + GRÁFICO) ---------
+        # Base: valor total dos serviços (não apenas sinal)
+        hoje = date.today()
+        inicio_mes = date(hoje.year, hoje.month, 1)
+        # mês anterior
+        if hoje.month == 1:
+            prev_year, prev_month = hoje.year - 1, 12
+        else:
+            prev_year, prev_month = hoje.year, hoje.month - 1
+        inicio_prev = date(prev_year, prev_month, 1)
+        fim_prev = (inicio_mes - timedelta(days=1))
+
+        # Semana atual (segunda->domingo)
+        # (isocalendar: Monday=1)
+        inicio_semana = hoje - timedelta(days=(hoje.weekday()))
+        fim_semana = inicio_semana + timedelta(days=6)
+
+        def _between(dts: pd.Series, d0: date, d1: date):
+            return (dts.dt.date >= d0) & (dts.dt.date <= d1)
+
+        # Garantias: colunas esperadas
+        if "Preço do serviço" not in df_admin.columns:
+            df_admin["Preço do serviço"] = 0.0
+        if "Sinal" not in df_admin.columns:
+            df_admin["Sinal"] = 0.0
+
+        # Mês atual
+        mask_mes = _between(df_admin["Data_dt"], inicio_mes, hoje)
+        df_mes = df_admin[mask_mes].copy()
+
+        faturamento_mes = float(df_mes[df_mes["Status_norm"].isin(["pago", "finalizado"])]["Preço do serviço"].sum() or 0.0)
+        previsto_mes = float(df_mes[df_mes["Status_norm"].isin(["pendente"])]["Preço do serviço"].sum() or 0.0)
+        atend_mes = int(len(df_mes))
+
+        sinais_mes = float(df_mes["Sinal"].sum() or 0.0) if deposit_on else 0.0
+
+        # Mês anterior (para %)
+        mask_prev = _between(df_admin["Data_dt"], inicio_prev, fim_prev)
+        df_prev = df_admin[mask_prev].copy()
+        faturamento_prev = float(df_prev[df_prev["Status_norm"].isin(["pago", "finalizado"])]["Preço do serviço"].sum() or 0.0)
+
+        if faturamento_prev > 0:
+            crescimento = ((faturamento_mes - faturamento_prev) / faturamento_prev) * 100.0
+        else:
+            crescimento = 0.0 if faturamento_mes == 0 else 100.0
+
+        icone = "📈" if crescimento >= 0 else "📉"
+        cor = "#22c55e" if crescimento >= 0 else "#ef4444"
+
+        # Semana atual
+        mask_semana = _between(df_admin["Data_dt"], inicio_semana, fim_semana)
+        df_semana = df_admin[mask_semana].copy()
+        faturamento_semana = float(df_semana[df_semana["Status_norm"].isin(["pago", "finalizado"])]["Preço do serviço"].sum() or 0.0)
+
+        # KPI card (premium)
+        st.markdown(
+            f"""
+            <style>
+              .kpi-wrap{{display:flex;gap:14px;flex-wrap:wrap}}
+              .kpi-card{{width:100%;padding:18px;border-radius:18px;
+                background:linear-gradient(135deg, rgba(34,197,94,.14), rgba(17,17,17,.35));
+                border:1px solid rgba(255,255,255,.10);
+                box-shadow: 0 10px 30px rgba(0,0,0,.25);
+              }}
+              .kpi-title{{display:flex;align-items:center;justify-content:space-between;gap:12px}}
+              .kpi-title h3{{margin:0;font-size:16px;opacity:.95}}
+              .kpi-big{{margin:8px 0 0 0;font-size:38px;line-height:1.05;font-weight:800;letter-spacing:-.6px}}
+              .kpi-sub{{margin:8px 0 0 0;opacity:.9;font-size:14px}}
+              .kpi-row{{margin-top:12px;display:flex;gap:10px;flex-wrap:wrap}}
+              .kpi-pill{{padding:8px 10px;border-radius:999px;
+                background:rgba(255,255,255,.06);
+                border:1px solid rgba(255,255,255,.10);
+                font-size:13px;
+              }}
+              @media (max-width: 520px){{
+                .kpi-big{{font-size:32px}}
+                .kpi-card{{padding:16px;border-radius:16px}}
+              }}
+            </style>
+            <div class="kpi-wrap">
+              <div class="kpi-card">
+                <div class="kpi-title">
+                  <h3>💰 Faturamento do mês</h3>
+                  <span style="font-size:13px;color:{cor};font-weight:700">{icone} {crescimento:.1f}% vs mês passado</span>
+                </div>
+                <div class="kpi-big">R$ {faturamento_mes:,.2f}</div>
+                <div class="kpi-sub">+ R$ {faturamento_semana:,.2f} esta semana</div>
+                <div class="kpi-row">
+                  <span class="kpi-pill">📅 {atend_mes} atendimentos</span>
+                  <span class="kpi-pill">💸 Previsto (pendentes): R$ {previsto_mes:,.2f}</span>
+                  {('<span class="kpi-pill">💎 Sinais: R$ ' + format(sinais_mes, ',.2f') + '</span>') if deposit_on else ''}
+                </div>
+              </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        # Gráfico últimos 6 meses (valor total dos serviços pagos/finalizados)
+        try:
+            df_chart = df_admin.copy()
+            df_chart = df_chart[df_chart["Data_dt"].notna()].copy()
+            df_chart["ym"] = df_chart["Data_dt"].dt.to_period("M").astype(str)
+            df_chart = df_chart[df_chart["Status_norm"].isin(["pago", "finalizado"])]
+            serie = (
+                df_chart.groupby("ym")["Preço do serviço"]
+                .sum()
+                .sort_index()
+            )
+
+            # pega últimos 6 meses (inclui mês atual)
+            if len(serie) > 0:
+                serie = serie.tail(6)
+                chart_df = pd.DataFrame({"Mês": serie.index.tolist(), "Faturamento": serie.values.tolist()}).set_index("Mês")
+                st.caption("📊 Últimos 6 meses (faturamento total de serviços pagos/finalizados)")
+                st.line_chart(chart_df)
+        except Exception:
+            # não quebra o painel se algo inesperado acontecer
+            pass
 
         # --------- filtros ---------
         colp1, colp2, colp3 = st.columns([1, 1, 1])
