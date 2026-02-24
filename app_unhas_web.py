@@ -256,11 +256,24 @@ def apply_theme():
           box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.45) !important;
         }
 
-        .chip b{ color: var(--text); }
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
+                .chip b{ color: var(--text); }
+
+                /* KPI principal (mobile + desktop) */
+                .kpi-main h1 {
+                    font-size: 42px;
+                    font-weight: 800;
+                }
+
+                @media (max-width: 768px){
+                    .kpi-main h1{
+                        font-size: 34px !important;
+                    }
+                }
+
+                </style>
+                """,
+                unsafe_allow_html=True,
+        )
 
 apply_theme()
 
@@ -270,37 +283,31 @@ apply_theme()
 st.markdown("""
 <style>
 .footer-logout {
-  position: fixed;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  padding: 14px 16px;
-  background: rgba(7, 11, 18, 0.70);
-  backdrop-filter: blur(8px);
-  border-top: 1px solid rgba(255,255,255,.10);
-  z-index: 9999;
+    margin-top: 60px;
+    padding: 16px;
+    background: rgba(7, 11, 18, 0.85);
+    border: 1px solid rgba(255,255,255,.08);
+    border-radius: 18px;
 }
 
 .footer-logout a {
-  display: block;
-  text-align: center;
-  padding: 12px 14px;
-  border-radius: 14px;
-  text-decoration: none;
-  border: 1px solid rgba(255,255,255,.16);
-  background: rgba(255,255,255,.04);
-  color: rgba(255,255,255,.92);
-  font-weight: 700;
+    display: block;
+    text-align: center;
+    padding: 14px;
+    border-radius: 14px;
+    text-decoration: none;
+    border: 1px solid rgba(255,255,255,.16);
+    background: rgba(255,255,255,.04);
+    color: rgba(255,255,255,.92);
+    font-weight: 600;
+    transition: all .2s ease;
 }
 
 .footer-logout a:hover {
-  transform: translateY(-1px);
-  border-color: rgba(56, 189, 248, .55);
-  background: rgba(56, 189, 248, .10);
+    transform: translateY(-2px);
+    border-color: rgba(56, 189, 248, .55);
+    background: rgba(56, 189, 248, .10);
 }
-
-/* espaço para não esconder conteúdo atrás do rodapé */
-.block-container { padding-bottom: 110px !important; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -2949,8 +2956,10 @@ def tela_admin():
                   <h3>💰 Faturamento do mês</h3>
                   <span style="font-size:13px;color:{cor};font-weight:700">{icone} {crescimento:.1f}% vs mês passado</span>
                 </div>
-                <div class="kpi-big">R$ {faturamento_mes:,.2f}</div>
-                <div class="kpi-sub">+ R$ {faturamento_semana:,.2f} esta semana</div>
+                                <div class="kpi-main">
+                                    <h1>{fmt_brl(faturamento_mes)}</h1>
+                                </div>
+                                <div class="kpi-sub">+ R$ {faturamento_semana:,.2f} esta semana</div>
                 <div class="kpi-row">
                   <span class="kpi-pill">📅 {atend_mes} atendimentos</span>
                   <span class="kpi-pill">💸 Previsto (pendentes): R$ {previsto_mes:,.2f}</span>
@@ -2978,7 +2987,7 @@ def tela_admin():
             if len(serie) > 0:
                 serie = serie.tail(6)
                 chart_df = pd.DataFrame({"Mês": serie.index.tolist(), "Faturamento": serie.values.tolist()}).set_index("Mês")
-                st.caption("📊 Últimos 6 meses (faturamento total de serviços pagos/finalizados)")
+                st.caption("📊 Últimos 6 meses — faturamento confirmado (pago + finalizado)")
                 st.line_chart(chart_df)
         except Exception:
             # não quebra o painel se algo inesperado acontecer
