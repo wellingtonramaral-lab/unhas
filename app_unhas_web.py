@@ -612,11 +612,6 @@ def tela_reset_senha():
 # ============================================================
 if "access_token" not in st.session_state:
     st.session_state.access_token = None
-# tenta restaurar token do navegador (F5/refresh)
-if st.session_state.access_token is None:
-    _tok = _ls_get("agenda_pro_access_token")
-    if _tok:
-        st.session_state.access_token = _tok
 
 # ============================================================
 # PERSISTÊNCIA DE LOGIN (evita desconectar ao atualizar a página)
@@ -677,6 +672,12 @@ if "show_deposit" not in st.session_state:
     st.session_state.show_deposit = False
 if "payment_url" not in st.session_state:
     st.session_state.payment_url = None
+
+# tenta restaurar token do navegador (F5/refresh)
+if st.session_state.access_token is None:
+    _tok = _ls_get("agenda_pro_access_token")
+    if _tok:
+        st.session_state.access_token = _tok
 
 # ============================================================
 # AUTH (ADMIN)
