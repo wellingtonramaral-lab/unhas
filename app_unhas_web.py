@@ -493,6 +493,18 @@ def unique_sorted_times(times):
     return sorted(clean)
 
 # ============================================================
+# GERADOR DE MENSAGEM DE COBRANÇA
+# ============================================================
+def gerar_mensagem_cobranca(nome, valor, data, hora):
+    return (
+        f"Olá {nome}! 💅✨\n\n"
+        f"Estou confirmando seu horário no dia {data} às {hora}.\n"
+        f"Para garantir sua reserva, o sinal é de R$ {valor:.2f}.\n\n"
+        f"Você pode realizar via Pix.\n"
+        f"Assim que enviar, me confirma por aqui 😊"
+    )
+
+# ============================================================
 # EDGE FUNCTIONS HELPERS
 # ============================================================
 def fn_headers():
@@ -3056,6 +3068,53 @@ def tela_admin():
             # Nunca quebrar o painel por causa desses extras
             pass
 
+        # --------- BLOCO ANTI-FURO (Com base no df_filtrado) ---------
+        if not pendentes_df.empty:
+
+            st.markdown("""
+            <div style="
+                margin-top:20px;
+                padding:18px;
+                border-radius:16px;
+                background:linear-gradient(135deg, rgba(239,68,68,.15), rgba(249,115,22,.12));
+                border:1px solid rgba(255,255,255,.08);
+            ">
+            """, unsafe_allow_html=True)
+
+            st.markdown(f"""
+            ### ⚠️ Risco de faturamento
+            Você tem **{len(pendentes_df)} agendamentos pendentes**
+            
+            💰 Em risco: **R$ {total_risco:,.2f}**
+            """)
+
+            # Selecionar cliente
+            opcoes = pendentes_df.apply(
+                lambda x: f"{x['Cliente']} - {x['Data']} {x['Horário']}",
+                axis=1
+            ).tolist()
+
+            selecionado = st.selectbox("Selecionar cliente para cobrar", opcoes)
+
+            linha = pendentes_df.iloc[opcoes.index(selecionado)]
+
+            mensagem = gerar_mensagem_cobranca(
+                linha["Cliente"],
+                linha["Preço do serviço"],
+                linha["Data"],
+                linha["Horário"]
+            )
+
+            numero_whatsapp = st.text_input("Número WhatsApp (com DDD)", "")
+
+            if numero_whatsapp:
+                link = f"https://wa.me/55{numero_whatsapp}?text={urllib.parse.quote(mensagem)}"
+                st.markdown(f"[💬 Enviar cobrança no WhatsApp]({link})")
+
+            st.markdown("</div>", unsafe_allow_html=True)
+
+        else:
+            st.success("Sem pendências agora. 🔥")
 
         # Gráfico (Recebido x Previsto)
         try:
@@ -3138,6 +3197,13 @@ def tela_admin():
                 wanted = [label_to_norm[x] for x in sel if x in label_to_norm]
                 if wanted:
                     df_filtrado = df_filtrado[df_filtrado["Status_norm"].isin(wanted)]
+
+        # --------- DETECTAR PENDENTES ---------
+        pendentes_df = df_filtrado[df_filtrado["Status_norm"] == "pendente"].copy()
+        
+        total_risco = 0.0
+        if not pendentes_df.empty:
+            total_risco = pendentes_df["Preço do serviço"].sum()
 
         # --------- KPIs úteis ---------
         total_gerado = float(df_filtrado["Preço do serviço"].sum()) if not df_filtrado.empty else 0.0
