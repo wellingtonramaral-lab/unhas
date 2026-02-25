@@ -493,18 +493,6 @@ def unique_sorted_times(times):
     return sorted(clean)
 
 # ============================================================
-# GERADOR DE MENSAGEM DE COBRANÇA
-# ============================================================
-def gerar_mensagem_cobranca(nome, valor, data, hora):
-    return (
-        f"Olá {nome}! 💅✨\n\n"
-        f"Estou confirmando seu horário no dia {data} às {hora}.\n"
-        f"Para garantir sua reserva, o sinal é de R$ {valor:.2f}.\n\n"
-        f"Você pode realizar via Pix.\n"
-        f"Assim que enviar, me confirma por aqui 😊"
-    )
-
-# ============================================================
 # EDGE FUNCTIONS HELPERS
 # ============================================================
 def fn_headers():
@@ -3040,14 +3028,89 @@ def tela_admin():
                 st.metric("Cancelamentos", f"{cancel_sem}")
 
                 st.markdown("#### ⚡ Ações sugeridas")
+
+                # ============================
+                # Máquina anti-furo (WhatsApp)
+                # ============================
+                if "pix_chave" not in st.session_state:
+                    # opcional: pode setar via st.secrets["PIX_CHAVE"]
+                    st.session_state.pix_chave = str(st.secrets.get("PIX_CHAVE", "")) if hasattr(st, "secrets") else ""
+
+                if "sinal_pct" not in st.session_state:
+                    st.session_state.sinal_pct = 30  # % padrão do sinal
+
                 if pend_count > 0:
                     st.warning(f"Você tem **{pend_count} pendentes** (≈ R$ {pend_valor:,.2f}).")
-                    # Link WA com texto pronto (usuário escolhe o contato)
-                    wa_text = urllib.parse.quote(
-                        "Oi! 😊 Só confirmando seu horário/ pagamento do atendimento. "
-                        "Posso te enviar o Pix do sinal pra garantir sua vaga? 💎"
-                    )
-                    st.markdown(f"👉 Abrir WhatsApp com mensagem pronta: https://wa.me/?text={wa_text}")
+
+                    with st.expander("💬 Cobrar pendente no WhatsApp (1 clique)", expanded=True):
+                        # Base de pendentes (mês filtrado se existir, senão tudo)
+                        df_base = df_mes if "df_mes" in locals() else df_admin
+                        df_pend = df_base[df_base["Status_norm"] == "pendente"].copy()
+
+                        # Inputs persistentes
+                        st.session_state.sinal_pct = st.number_input(
+                            "Percentual do sinal (%)",
+                            min_value=0,
+                            max_value=100,
+                            value=int(st.session_state.sinal_pct),
+                            step=5,
+                        )
+                        st.session_state.pix_chave = st.text_input(
+                            "Chave Pix (opcional)",
+                            value=st.session_state.pix_chave,
+                            placeholder="Cole sua chave Pix aqui (cpf/email/aleatória)",
+                        )
+
+                        tel = st.text_input(
+                            "WhatsApp do cliente (opcional, só números com DDD)",
+                            value="",
+                            placeholder="Ex: 48999999999",
+                            help="Se você preencher, o link abre direto na conversa do cliente. Se deixar vazio, abre o WhatsApp com a mensagem pronta pra você escolher o contato.",
+                        )
+
+                        # Monta opções
+                        def _label_row(r):
+                            data = str(r.get("Data", "")).strip()
+                            hora = str(r.get("Horário", "")).strip()
+                            cli = str(r.get("Cliente", "")).strip()
+                            preco = float(r.get("Preço do serviço", 0.0) or 0.0)
+                            return f"{cli} • {data} {hora} • R$ {preco:,.2f}"
+
+                        opcoes = df_pend.apply(_label_row, axis=1).tolist()
+                        if not opcoes:
+                            st.info("Não encontrei pendentes na tabela atual.")
+                        else:
+                            escolha = st.selectbox("Selecione um pendente", opcoes, index=0)
+                            row = df_pend.iloc[opcoes.index(escolha)]
+
+                            cli = str(row.get("Cliente", "")).strip() or "cliente"
+                            data = str(row.get("Data", "")).strip()
+                            hora = str(row.get("Horário", "")).strip()
+                            preco = float(row.get("Preço do serviço", 0.0) or 0.0)
+
+                            sinal_val = round(preco * (float(st.session_state.sinal_pct) / 100.0), 2)
+
+                            msg = (
+                                f"Oi {cli}! 💅✨\n\n"
+                                f"Confirmando seu horário em *{data}* às *{hora}*.\n"
+                                f"Pra garantir a reserva, o sinal é *R$ {sinal_val:,.2f}*.\n\n"
+                            )
+
+                            if st.session_state.pix_chave.strip():
+                                msg += f"Chave Pix: *{st.session_state.pix_chave.strip()}*\n\n"
+
+                            msg += "Assim que enviar, me manda o comprovante por aqui 😊"
+
+                            wa_text = urllib.parse.quote(msg)
+
+                            if tel.strip():
+                                # Brasil: +55
+                                clean_tel = re.sub(r"\D", "", tel)
+                                wa_url = f"https://wa.me/55{clean_tel}?text={wa_text}"
+                            else:
+                                wa_url = f"https://wa.me/?text={wa_text}"
+
+                            st.markdown(f"[✅ Abrir WhatsApp com cobrança pronta]({wa_url})")
                 else:
                     st.success("Sem pendências agora. 🔥")
 
@@ -3068,53 +3131,6 @@ def tela_admin():
             # Nunca quebrar o painel por causa desses extras
             pass
 
-        # --------- BLOCO ANTI-FURO (Com base no df_filtrado) ---------
-        if not pendentes_df.empty:
-
-            st.markdown("""
-            <div style="
-                margin-top:20px;
-                padding:18px;
-                border-radius:16px;
-                background:linear-gradient(135deg, rgba(239,68,68,.15), rgba(249,115,22,.12));
-                border:1px solid rgba(255,255,255,.08);
-            ">
-            """, unsafe_allow_html=True)
-
-            st.markdown(f"""
-            ### ⚠️ Risco de faturamento
-            Você tem **{len(pendentes_df)} agendamentos pendentes**
-            
-            💰 Em risco: **R$ {total_risco:,.2f}**
-            """)
-
-            # Selecionar cliente
-            opcoes = pendentes_df.apply(
-                lambda x: f"{x['Cliente']} - {x['Data']} {x['Horário']}",
-                axis=1
-            ).tolist()
-
-            selecionado = st.selectbox("Selecionar cliente para cobrar", opcoes)
-
-            linha = pendentes_df.iloc[opcoes.index(selecionado)]
-
-            mensagem = gerar_mensagem_cobranca(
-                linha["Cliente"],
-                linha["Preço do serviço"],
-                linha["Data"],
-                linha["Horário"]
-            )
-
-            numero_whatsapp = st.text_input("Número WhatsApp (com DDD)", "")
-
-            if numero_whatsapp:
-                link = f"https://wa.me/55{numero_whatsapp}?text={urllib.parse.quote(mensagem)}"
-                st.markdown(f"[💬 Enviar cobrança no WhatsApp]({link})")
-
-            st.markdown("</div>", unsafe_allow_html=True)
-
-        else:
-            st.success("Sem pendências agora. 🔥")
 
         # Gráfico (Recebido x Previsto)
         try:
@@ -3197,13 +3213,6 @@ def tela_admin():
                 wanted = [label_to_norm[x] for x in sel if x in label_to_norm]
                 if wanted:
                     df_filtrado = df_filtrado[df_filtrado["Status_norm"].isin(wanted)]
-
-        # --------- DETECTAR PENDENTES ---------
-        pendentes_df = df_filtrado[df_filtrado["Status_norm"] == "pendente"].copy()
-        
-        total_risco = 0.0
-        if not pendentes_df.empty:
-            total_risco = pendentes_df["Preço do serviço"].sum()
 
         # --------- KPIs úteis ---------
         total_gerado = float(df_filtrado["Preço do serviço"].sum()) if not df_filtrado.empty else 0.0
